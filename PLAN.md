@@ -1,17 +1,17 @@
-# Chafftafarian — Implementation Plan & Checklist
+# Chafftafarian: Implementation Plan & Checklist
 
 Execution order for building and verifying the app. Phases 0–8 are
 complete as of v0.1.0; the checklists double as regression recipes.
 docs/SPEC.md is the authoritative behavior spec.
 
-## Phase 0 — Scaffold
+## Phase 0: Scaffold
 
 - [x] Repo layout mirroring video-hls: `apps/desktop/`, `packaging/`,
       `docs/`, `.github/workflows/`
 - [x] pyproject (py3.12, deps union, hatch packages both src trees)
 - [x] LICENSE (MIT), .gitignore, .python-version, README stub, git init
 
-## Phase 1 — Vendor the chaff core
+## Phase 1: Vendor the chaff core
 
 - [x] Copy `chaff_generator` minus `gui/`; copy tests minus `ui/`; copy
       `scripts/` (benchmark.py is a test dependency); write VENDORED.md
@@ -19,7 +19,7 @@ docs/SPEC.md is the authoritative behavior spec.
 - [x] Gate: `uv sync --extra dev && uv run pytest` green (311 tests);
       `chaff generate --target /tmp/x --size 1MiB --seed 7` produces a run
 
-## Phase 2 — GUI shell port
+## Phase 2: GUI shell port
 
 - [x] app.py / __main__.py (VIEWS, screenshot harness, `--wipe-worker`
       dispatch before Qt import), config.py, api.py skeleton
@@ -27,7 +27,7 @@ docs/SPEC.md is the authoritative behavior spec.
       mock.js, components + tokens verbatim, new icon
 - [x] Gate: `--screenshot all` non-blank; JS parses; `?mock=1` backend
 
-## Phase 3 — Chaff GUI
+## Phase 3: Chaff GUI
 
 - [x] chaff_adapter.py (QThread; events → `chaff` / `chaff.log` /
       `chaff.summary`)
@@ -38,7 +38,7 @@ docs/SPEC.md is the authoritative behavior spec.
 - [x] Gate: `tests/test_api.py` (E2E generation through the bridge,
       verify INTACT, cleanup refusal, settings round-trip)
 
-## Phase 4 — Device layer
+## Phase 4: Device layer
 
 - [x] tools.py seam (ToolRunner protocol; subprocess + fake runners;
       missing-command and timeout as results, not exceptions)
@@ -50,7 +50,7 @@ docs/SPEC.md is the authoritative behavior spec.
       gate; hard vs soft; recheck_before_pass)
 - [x] Gate: `tests/test_wipe.py` parser/inventory/safety sections
 
-## Phase 5 — Wipe pipeline
+## Phase 5: Wipe pipeline
 
 - [x] plan.py (paranoid 6 / quick / verify), writer.py (pattern writes,
       O_DIRECT + fallback, ENOSPC-normal, sampled verify, cancel),
@@ -66,18 +66,18 @@ docs/SPEC.md is the authoritative behavior spec.
       mid-sanitize; sanitize failure propagation; headless worker
       dispatch
 
-## Phase 6 — Settings + Dispatch
+## Phase 6: Settings + Dispatch
 
 - [x] FieldSpec settings view (allow_non_nvme, persisted app.json)
 - [x] Dispatch: logsList/logRead/tailStart/tailStop over wipe archives
       and chaff journals
 
-## Phase 7 — Docs
+## Phase 7: Docs
 
 - [x] docs/SPEC.md (this file's authoritative sibling)
 - [x] PLAN.md (this file), README.md, VENDORED.md, BRIDGE.md
 
-## Phase 8 — Packaging + CI
+## Phase 8: Packaging + CI
 
 - [x] packaging/appimage.sh (name, no engine tree, default-pack
       collection check, `--selftest-wipe-plan` smoke, drives screenshot)
@@ -109,13 +109,13 @@ bash -n packaging/appimage.sh
 CI and dev machines must never see this path. On a machine with a scratch
 NVMe drive you are willing to destroy:
 
-1. `nvme id-ctrl /dev/nvmeXn1` — compare sanicap bits against the DRIVES
+1. `nvme id-ctrl /dev/nvmeXn1`: compare sanicap bits against the DRIVES
    view and the vendor datasheet (crypto/overwrite bit order, NVMe 1.4 vs
    2.0 caveat in SPEC §2).
-2. Build the plan on the scratch drive — dry run only.
-3. Start the wipe, cancel during pass 2 — confirm writes stop and the
+2. Build the plan on the scratch drive: dry run only.
+3. Start the wipe, cancel during pass 2: confirm writes stop and the
    summary reports cancelled.
-4. Start again, cancel during sanitize — confirm the abort path:
+4. Start again, cancel during sanitize: confirm the abort path:
    `sudo nvme sanitize-log /dev/nvmeXn1` should show the state leaving
    in-progress after `--sanact=0`.
 5. Full paranoid wipe with verification.
@@ -128,7 +128,7 @@ NVMe drive you are willing to destroy:
 
 ## Deferred (documented, not built)
 
-- Windows build (chaff native; device ops via `wsl --mount --bare` —
+- Windows build (chaff native; device ops via `wsl --mount --bare`,
   Win11-only, fragile; the Control Room WSL2 backend pattern applies)
 - Guided wipe → mkfs → mount → chaff flow (v1 documents the manual steps)
 - SANACT=1 crypto-erase and SANACT=3 overwrite actions in the plan builder

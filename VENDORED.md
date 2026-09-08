@@ -14,16 +14,18 @@ are vendored from the chaff-generator repository:
 
 Deletions relative to upstream (deliberate):
 
-- `src/chaff_generator/gui/` — the old Qt-widgets GUI, replaced by the Control
+- `src/chaff_generator/gui/`: the old Qt-widgets GUI, replaced by the Control
   Room-style web frontend (`frontend/`) driven through `src/chafftafarian/api.py`.
-- `tests/ui/` — tests for that GUI.
+- `tests/ui/`: tests for that GUI.
 
 Additions relative to upstream:
 
-- `apps/desktop/scripts/` — dev scripts (`benchmark.py` is invoked by
+- `apps/desktop/scripts/`: dev scripts (`benchmark.py` is invoked by
   `tests/integration/test_storage_modes.py`; the other two are reference tools).
 
-Everything else is byte-identical to the upstream tree at the commit above. The chaff
+Everything else is byte-identical to the upstream tree at the commit above
+(upstream punctuation included: the no-em-dash house rule applies to this
+repo's own files, not to the vendored copy). The chaff
 core keeps its upstream guarantees: file-level operation only, no block devices, no
 privilege escalation (major-plan.md §9.5, §9.6). Device operations live exclusively in
 `src/chafftafarian/wipe/`, a separate module under separate rules.

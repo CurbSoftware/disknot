@@ -1,4 +1,4 @@
-# BRIDGE.md — the Qt ↔ HTML contract (frozen)
+# BRIDGE.md: the Qt ↔ HTML contract (frozen)
 
 Chafftafarian embeds the frontend in a `QWebEngineView`. Python exposes
 exactly one object over a `QWebChannel`: id **`api`**. Every slot takes and
@@ -6,7 +6,7 @@ returns **strings** (`QString`); every payload is **JSON** encoded in
 UTF-8. Async slots return immediately (JS gets `undefined`); results
 stream back as signals.
 
-Do not change payload field names. Additive fields may appear — ignore ones
+Do not change payload field names. Additive fields may appear: ignore ones
 you do not know.
 
 ## Signals (Qt → JS)
@@ -33,7 +33,7 @@ you do not know.
 ### `stateChanged(QString json)`
 
 `{"busy": bool, "kind": "chaff"|"wipe"|null, "started": iso|null,
-"core_version": str, "tools": {name: path|null}}` — one operation at a
+"core_version": str, "tools": {name: path|null}}`: one operation at a
 time across the whole app.
 
 ## Slots
@@ -72,7 +72,7 @@ live (set after the first successful generation).
 
 ### Wipe
 
-- `QString wipePlan(config_json)` — config
+- `QString wipePlan(config_json)`: config
   `{"device", "verify"?, "quick"?, "unmount"?}` → plan:
 
 ```json
@@ -85,14 +85,14 @@ live (set after the first successful generation).
 
 `blockers` is empty when the plan may proceed.
 
-- `QString wipeStart(config_json)` — config adds `confirm_word`
+- `QString wipeStart(config_json)`: config adds `confirm_word`
   (must be `"DESTROY"`) and `confirm_device` (must equal `device`).
   Sync ack `{"ok": bool, "error": str|null}`; events then stream on the
   `wipe`/`wipe.log` channels; a final `wipe.summary` report.
 
 - `QString wipeAbort()` → `{"ok": bool, "error": …}`; cancellation lands
   at the next worker checkpoint (write block, pass boundary, or sanitize
-  poll — during sanitize the worker issues `--sanact=0`).
+  poll: during sanitize the worker issues `--sanact=0`).
 
 Worker events on the `wipe` channel (one JSON per line):
 
@@ -158,7 +158,7 @@ Config shape (the core's `dict_to_config` validates; see SPEC §1.2):
   `{engine, name, path, size_bytes, mtime}`.
 - `QString logRead(path, tail_bytes="65536")` → `{path, text}` or
   `{path, text: "", error: "not found"}`.
-- `void tailStart(path)` / `void tailStop()` — lines arrive on `tail`.
+- `void tailStart(path)` / `void tailStop()`: lines arrive on `tail`.
 - `QString pickDirectory(current)` → chosen path or "".
 - `void openPath(path)` / `void revealFile(path)`.
-- `void viewReady(view)` — the screenshot harness waits on this.
+- `void viewReady(view)`: the screenshot harness waits on this.

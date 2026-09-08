@@ -1,4 +1,4 @@
-"""python -m chafftafarian — GUI launcher, offscreen screenshot harness, and
+"""python -m chafftafarian: GUI launcher, offscreen screenshot harness, and
 the privileged wipe-worker entry.
 
     python -m chafftafarian                              # launch the app
@@ -92,7 +92,7 @@ def _grab(app: QApplication, view: Window) -> tuple[QPixmap | None, bool]:
         pix = view.grab()
         w, h = pix.width(), pix.height()
         # central band of the main column (sidebar ~240px left, status bar
-        # ~44px bottom) — safely inside at any window size
+        # ~44px bottom): safely inside at any window size
         crop = pix.copy(
             int(w * 0.45),
             int(h * 0.25),
@@ -209,7 +209,7 @@ def _shoot(
 def _selftest_wipe_plan() -> int:
     """Packaging smoke: the frozen app must be able to build the paranoid
     plan (proves the wipe package and chaff-free imports survived freezing
-    — PyInstaller's favorite failure). No devices, no root."""
+   : PyInstaller's favorite failure). No devices, no root."""
     from .wipe.inventory import DeviceInfo
     from .wipe.nvme import parse_sanicap, parse_sanitize_log
     from .wipe.plan import build_plan
@@ -243,7 +243,7 @@ def _selftest_wipe_plan() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="chafftafarian", description="Chafftafarian — chaff, NVMe tools, sanitization"
+        prog="chafftafarian", description="Chafftafarian: chaff, NVMe tools, sanitization"
     )
     parser.add_argument(
         "views",
@@ -322,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     frontend = resolve_frontend()
     if frontend is None:
         print(
-            "frontend index.html not found — set CHAFFTAFARIAN_FRONTEND "
+            "frontend index.html not found: set CHAFFTAFARIAN_FRONTEND "
             "or run from the repo checkout",
             file=sys.stderr,
         )

@@ -1,4 +1,4 @@
-# Releases — tags only (v*), or dispatched by hand. Never fires on pushes
+# Releases: tags only (v*), or dispatched by hand. Never fires on pushes
 # to main, and never runs the test suite twice: it reuses the same steps
 # ci.yml runs, because a release artifact must come from the same recipe.
 #

@@ -1,4 +1,4 @@
-"""safety.py — the refusal layer. Nothing here is a convenience.
+"""safety.py: the refusal layer. Nothing here is a convenience.
 
 `check_device` produces a verdict the GUI renders BEFORE any confirmation
 and the root worker re-runs before EVERY pass. Hard refusals (os_disk,
@@ -83,26 +83,26 @@ def check_device(
 ) -> SafetyVerdict:
     """Verdict for wiping `dev`. `allow_non_nvme` mirrors the app setting
     (off by default; exists for SATA/USB/loop). `unmount_planned` waives the
-    mounted-refusal — the worker will unmount, logged, and re-check."""
+    mounted-refusal: the worker will unmount, logged, and re-check."""
     verdict = SafetyVerdict(ok=True)
 
     if not dev.is_disk:
         verdict.hard_blockers.append(f"{dev.path} is a {dev.type}, not a whole disk")
     if dev.kname in os_disk_knames(runner):
         verdict.hard_blockers.append(
-            f"{dev.path} hosts the running operating system — never wipeable"
+            f"{dev.path} hosts the running operating system: never wipeable"
         )
     if dev.swap:
         verdict.hard_blockers.append(
-            f"{dev.path} has active swap — swapoff it (or its parent) first"
+            f"{dev.path} has active swap: swapoff it (or its parent) first"
         )
 
     if dev.mounted and not unmount_planned:
         mounts = ", ".join(dev.mountpoints()) or "unknown mountpoints"
-        verdict.soft_blockers.append(f"mounted: {mounts} — unmount first, or let the worker do it")
+        verdict.soft_blockers.append(f"mounted: {mounts}: unmount first, or let the worker do it")
     if not dev.is_nvme and not allow_non_nvme:
         verdict.soft_blockers.append(
-            "not an NVMe device — enable non-NVMe devices in settings (testing path) to waive"
+            "not an NVMe device: enable non-NVMe devices in settings (testing path) to waive"
         )
 
     verdict.ok = not verdict.hard_blockers and not verdict.soft_blockers
@@ -111,7 +111,7 @@ def check_device(
 
 def recheck_before_pass(dev: DeviceInfo, runner: ToolRunner, allow_non_nvme: bool) -> SafetyVerdict:
     """The between-passes gate: mountedness is a hard refusal here because
-    the unmount already happened — anything mounted appeared since."""
+    the unmount already happened: anything mounted appeared since."""
     verdict = SafetyVerdict(ok=True)
     if not dev.is_disk:
         verdict.hard_blockers.append(f"{dev.path} is not a whole disk")

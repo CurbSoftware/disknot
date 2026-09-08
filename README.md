@@ -4,8 +4,8 @@ Chaff generation, NVMe tools, and drive sanitization in one desktop app.
 
 Chafftafarian fills wiped or fresh storage with realistic synthetic files
 (documents, mail, spreadsheets, payload blobs) that are deterministic,
-verifiable, and confined to their own run directories — and it sanitizes
-NVMe drives properly: the controller Sanitize command bracketing overwrite
+verifiable, and confined to their own run directories. It also
+sanitizes NVMe drives properly: the controller Sanitize command bracketing overwrite
 passes, with per-pass progress, cancellation that works, and sampled
 verification.
 
@@ -17,7 +17,7 @@ Download `chafftafarian-x86_64.AppImage` from Releases, make it
 executable, run it. Linux only in v1.
 
 Device operations need root; the app asks through pkexec (a system
-password dialog) at the moment an operation starts — the GUI itself never
+password dialog) at the moment an operation starts; the GUI itself never
 runs as root. Requirements: `nvme-cli` for NVMe probing and sanitize
 (`sudo apt install nvme-cli` or the equivalent).
 
@@ -38,7 +38,7 @@ Keyboard: `1`–`6` jump exits, `Esc` backs out of dialogs.
 
 - The disk your OS runs on is never wipeable. No override exists.
 - Active swap is never wipeable.
-- Mounted drives are refused until unmounted — by you, or explicitly by
+- Mounted drives are refused until unmounted, whether by you or explicitly by
   the worker (logged, and re-checked before every pass).
 - Non-NVMe devices are off by default (a settings switch exists for loop-
   device testing).
@@ -61,11 +61,11 @@ uv run chaff generate --target /tmp/x --size 1MiB   # vendored CLI
 
 Packaging and releases:
 
-- **Local**: `./package.sh` — builds the AppImage end to end and
+- **Local**: `./package.sh` builds the AppImage end to end and
   smoke-tests it (same script CI uses).
 - **CI**: `ci.yml` runs on demand only (Actions → ci → Run); pushes to
   main do not trigger anything.
-- **Releases**: `release.yml` fires on `v*` tags — `git tag v0.1.0 && git
+- **Releases**: `release.yml` fires on `v*` tags. `git tag v0.1.0 && git
   push origin v0.1.0` publishes a Release with the AppImage.
 
 Documentation: docs/SPEC.md (behavior spec, decode tables, safety model),

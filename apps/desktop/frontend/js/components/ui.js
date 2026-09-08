@@ -1,4 +1,4 @@
-// Control Room — components/ui.js
+// Control Room: components/ui.js
 // DOM-builder helpers. Most return HTML strings (safe to compose); interactive
 // components (logStream, in progress.js) return objects. All text passed
 // through esc() unless the caller wraps it in raw()/mono() deliberately.
@@ -18,12 +18,12 @@ export function micro(text, cls = '') {
   return `<span class="micro ${cls}">${val(text)}</span>`;
 }
 
-// chip(state, text) — state: ok | warn | err | idle. Pill + status dot.
+// chip(state, text): state: ok | warn | err | idle. Pill + status dot.
 export function chip(state, text, { lg = false } = {}) {
   return `<span class="chip ${state}${lg ? ' lg' : ''}"><span class="dot" aria-hidden="true"></span>${val(text)}</span>`;
 }
 
-// btn({label, kind, icon, tip, id, disabled}) — kind: primary | ghost | danger.
+// btn({label, kind, icon, tip, id, disabled}): kind: primary | ghost | danger.
 export function btn({ label, kind = 'ghost', icon = '', tip = '', id = '', disabled = false, attrs = '' }) {
   const tipAttr = tip ? `data-tip="${esc(tip)}"` : '';
   const idAttr = id ? `id="${esc(id)}"` : '';
@@ -33,13 +33,13 @@ export function btn({ label, kind = 'ghost', icon = '', tip = '', id = '', disab
     `${val(label)}</button>`;
 }
 
-// kv(pairs) — [[key, value], …]; mono keys, sans values. Values may be raw().
+// kv(pairs): [[key, value], …]; mono keys, sans values. Values may be raw().
 export function kv(pairs) {
   return `<dl class="kv">${pairs.map(([k, v]) =>
     `<dt>${val(k)}</dt><dd>${val(v)}</dd>`).join('')}</dl>`;
 }
 
-// card({num, title, eyebrow, right, children}) — numbered hairline panel.
+// card({num, title, eyebrow, right, children}): numbered hairline panel.
 export function card({ num, title, eyebrow = '', right = '', children }) {
   return `<section class="card">` +
     `<header class="card-head">` +
@@ -49,7 +49,7 @@ export function card({ num, title, eyebrow = '', right = '', children }) {
     `</header>${children}</section>`;
 }
 
-// laneRow({label, status, detail}) — status: ok | warn | err | idle.
+// laneRow({label, status, detail}): status: ok | warn | err | idle.
 // The workhorse row for encoders, tools, tiers.
 export function laneRow({ label, status = 'idle', detail = '' }) {
   return `<div class="lane ${status}">` +
@@ -59,7 +59,7 @@ export function laneRow({ label, status = 'idle', detail = '' }) {
     `</div>`;
 }
 
-// table(headers, rows) — utilitarian data table. Cells may be raw().
+// table(headers, rows): utilitarian data table. Cells may be raw().
 export function table(headers, rows) {
   const head = headers.map((h) => `<th>${val(h)}</th>`).join('');
   const body = rows.map((r) =>
@@ -67,7 +67,7 @@ export function table(headers, rows) {
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
-// pageHeader({exit, title, lede, coords}) — every view's top block.
+// pageHeader({exit, title, lede, coords}): every view's top block.
 export function pageHeader({ exit, title, lede = '', coords = '' }) {
   return `<header class="page-head">` +
     `<div class="eyebrow"><span class="rule" aria-hidden="true"></span>${micro(`EXIT ${exit}`)}` +
@@ -78,7 +78,7 @@ export function pageHeader({ exit, title, lede = '', coords = '' }) {
     `</header>`;
 }
 
-// emptyState({code, headline, guidance, action}) — the onboarding moment.
+// emptyState({code, headline, guidance, action}): the onboarding moment.
 export function emptyState({ code, headline, guidance, action = '' }) {
   return `<div class="empty grid-wash">` +
     `<span class="empty-code" aria-hidden="true">${val(code)}</span>` +
@@ -88,7 +88,7 @@ export function emptyState({ code, headline, guidance, action = '' }) {
     `</div>`;
 }
 
-// sectionHead({num, title, meta}) — in-view section shoulder.
+// sectionHead({num, title, meta}): in-view section shoulder.
 export function sectionHead({ num, title, meta = '' }) {
   return `<div class="section-head"><span class="section-num" aria-hidden="true">${val(num)}</span>` +
     `<h2>${val(title)}</h2>` +

@@ -1,14 +1,14 @@
-# Chafftafarian — Specification
+# Chafftafarian: Specification
 
 Chafftafarian is a Linux desktop application that combines three storage
 tools in one Control Room-style interface:
 
-1. **Chaff** — deterministic generation of realistic synthetic file corpora
+1. **Chaff**: deterministic generation of realistic synthetic file corpora
    (documents, email, spreadsheets, payload blobs) into self-contained,
    verifiable run directories.
-2. **Drives** — an honest inventory of attached disks: geometry, mounts,
+2. **Drives**: an honest inventory of attached disks: geometry, mounts,
    transport, and what the NVMe controller actually supports.
-3. **Sanitize** — whole-disk sanitization for NVMe drives: the controller
+3. **Sanitize**: whole-disk sanitization for NVMe drives: the controller
    Sanitize command bracketing overwrite passes, with sampled verification,
    live per-pass progress, and cancellation that works against a root
    process.
@@ -23,7 +23,7 @@ Each half is independently usable.
 > reports what it did; it cannot certify what the firmware did beyond the
 > sanitize status word. For policy context see NIST SP 800-88 Rev. 1
 > (Clear vs Purge). Chaff generation is explicitly NOT a sanitization
-> method — the app says so wherever chaff could be mistaken for one.
+> method: the app says so wherever chaff could be mistaken for one.
 
 Status: v0.1.0, Linux-only. Architecture, UI, and packaging are adapted
 from video-hls "Control Room"; chaff functionality is vendored from
@@ -46,11 +46,11 @@ against that file.
 One run = one directory `Chaff_Run_YYYYMMDD_HHMMSS_<4hex>/` under a
 user-chosen target, containing:
 
-- `.chaff-run.json` — the identity marker (cleanup refuses to delete
+- `.chaff-run.json`: the identity marker (cleanup refuses to delete
   anything without it matching),
-- `.chaff-manifest.json` — per-file records (path, size, sha256, renderer,
+- `.chaff-manifest.json`: per-file records (path, size, sha256, renderer,
   template, seed),
-- `.chaff-journal.jsonl` — append-only write journal, fsynced every 64
+- `.chaff-journal.jsonl`: append-only write journal, fsynced every 64
   records (crash recovery evidence),
 - a realistic tree (`Departments/Finance/…`, `Mail/inbox/…`,
   `Projects/<name>/…`).
@@ -63,13 +63,13 @@ symlink redirection (`safe_join`, major-plan §9.3).
 
 | Parameter | Values / format | Default | Notes |
 |---|---|---|---|
-| target | directory path | — | holds the run directories |
+| target | directory path |: | holds the run directories |
 | mode | `exact` / `percent_free` / `fill_until_reserve` | exact | §8; exactly one amount semantics |
 | amount | size string (`10 GiB`, `1.5 GB`, fractions) | 10 GiB | exact mode; §8.1 |
 | percent | 0.0–100.0 | 50 | percent_free mode; §8.2 |
 | reserve | size string | 2 GB | bytes always left free; re-checked between files; §9.7 |
 | profile | realistic-desktop, office-workstation, personal-computer, developer-workstation, balanced, storage-test, mixed | realistic-desktop | §69; format/content weights, size ranges, layout |
-| types override | comma list of formats | — | overrides profile format mix; §21 lists the 16 formats |
+| types override | comma list of formats |: | overrides profile format mix; §21 lists the 16 formats |
 | layout | flat / simple / realistic | realistic | §30 |
 | seed | integer, 0 = fresh random | 0 | same seed = byte-identical corpus anywhere; §11 |
 | completion | keep / delete / trash | keep | §38–41; destructive only on `completed` |
@@ -80,7 +80,7 @@ pptx, vcf, ics, dat (non-sparse payload, §22), dev.
 
 Determinism: one master seed derives per-file seeds
 (`sha256("chaff-file-seed:v1:{master}:{index}")`); `.dat` payload bytes are
-`shake_256` digests — streamable, deterministic, never sparse (§59).
+`shake_256` digests: streamable, deterministic, never sparse (§59).
 
 Backstops: max 1,000,000 files per run; abort after 20 consecutive
 failures; never emit a file smaller than 16 bytes; fill modes re-read the
@@ -114,7 +114,7 @@ filesystem between files ("the monitor's truth wins", §58).
 `lsblk -Jb -o NAME,SIZE,TYPE,KNAME,MODEL,SERIAL,TRAN,MOUNTPOINTS,FSTYPE,CHILDREN`
 is the source of truth for geometry and mounts; `nvme list -o json`
 enriches model/serial when nvme-cli is present. RAM disks (zram), optical
-(rom), and partitions are excluded — the view lists whole disks only.
+(rom), and partitions are excluded: the view lists whole disks only.
 
 Per NVMe device the controller identify data is probed:
 `nvme id-ctrl` → **sanicap**.
@@ -140,7 +140,7 @@ vendor datasheet when crypto-erase matters.
 |---|---|
 | 0 | abort a running sanitize |
 | 1 | crypto erase |
-| 2 | block erase — the paranoid plan's choice |
+| 2 | block erase: the paranoid plan's choice |
 | 3 | overwrite (with pattern, via the overwrite action) |
 
 **SSTAT** (sanitize status log, bits [2:0] = state of the most recent
@@ -154,8 +154,8 @@ sanitize):
 | 0b011 | in progress |
 
 Bit 8 set means the sanitize actually modified the media (global data
-erasure happened). `SSTAT = 0x101` — the value a healthy block erase
-leaves behind — decodes to success + media modified. **SPROG** is a
+erasure happened). `SSTAT = 0x101`: the value a healthy block erase
+leaves behind: decodes to success + media modified. **SPROG** is a
 progress fraction with denominator 65536 (`percent = sprog * 100 / 65535`).
 
 Completion rule (matching the battle-tested bash original):
@@ -194,7 +194,7 @@ where sanitize is unavailable and make the end state inspectable.
   fsync, ENOSPC on the last partial block reported as normal (the bash
   original's TROUBLESHOOTING documented the same). This buys exact
   progress, a cancellation checkpoint per block, and testability.
-- Sanitize monitoring polls `nvme sanitize-log` only — other admin
+- Sanitize monitoring polls `nvme sanitize-log` only: other admin
   commands fail while a sanitize is in flight. Poll every 5 s; a sanitize
   exceeding 24 h is reported as power-cycle territory.
 - Verification samples the first, middle, and last 4 KiB blocks plus a
@@ -204,7 +204,7 @@ where sanitize is unavailable and make the end state inspectable.
 - Cancellation: the GUI touches a `cancel` file in a 0700 control
   directory it created; the root worker checks it between write blocks,
   between passes, and on every sanitize poll. Cancel during sanitize
-  issues `--sanact=0` and drains the status log (bounded to 5 minutes —
+  issues `--sanact=0` and drains the status log (bounded to 5 minutes;
   an aborted sanitize can leave firmware opinionated).
 
 ### 3.3 Privilege model
@@ -223,7 +223,7 @@ streaming JSONL events on stdout. Notes:
   `org.freedesktop.policykit.exec` action authenticates any executable
   path. Shipping a `.policy` would pin the unstable AppImage path.
 - The worker re-validates the config, re-resolves the device, and re-runs
-  the safety gate — it never trusts the GUI's word. It refuses to run
+  the safety gate: it never trusts the GUI's word. It refuses to run
   non-root. Its only inputs are the config file and the cancel file.
 - The worker imports no Qt (headless root requirement); the dispatch
   happens in `__main__.py` before any Qt import.
@@ -242,10 +242,10 @@ Hard refusals (no override anywhere):
 
 Soft refusals (explicitly waived by user choices that ride the config):
 
-- Mounted partitions — refuse until the user either unmounts or checks
-  "unmount for me" (the worker then umounts, logging each result — fixing
+- Mounted partitions: refuse until the user either unmounts or checks
+  "unmount for me" (the worker then umounts, logging each result: fixing
   the bash original's silent `umount … || true`).
-- Non-NVMe device — gated behind a settings switch, off by default; it
+- Non-NVMe device: gated behind a settings switch, off by default; it
   exists so the wipe path can be tested on loop devices.
 
 Confirmation UX: to arm the wipe the user must type **DESTROY** and the
@@ -281,7 +281,7 @@ Control Room pattern (from video-hls), adapted:
   `inventory.py`, `nvme.py` (parsers), `safety.py`, `plan.py`,
   `writer.py`, `orchestrator.py`, `protocol.py` (JSONL contract),
   `worker.py` (root entry). Qt-free.
-- **Vendored chaff core** `src/chaff_generator/` — unmodified except the
+- **Vendored chaff core** `src/chaff_generator/`: unmodified except the
   old widgets GUI is deleted. See VENDORED.md.
 - **Frontend** `frontend/`: hash-routed views (01 Drives, 02 Sanitize,
   03 Chaff, 04 Runs, 05 Settings, 06 Dispatch), `?mock=1` browser mode
@@ -294,7 +294,7 @@ Control Room pattern (from video-hls), adapted:
 ### The §9.5/§9.6 boundary
 
 The chaff core's spec forbids raw block-device operations and privilege
-escalation (major-plan.md §9.5, §9.6) — and the vendored core keeps those
+escalation (major-plan.md §9.5, §9.6): and the vendored core keeps those
 guarantees. Chafftafarian's device side violates exactly those two rules,
 by design and in isolation: all block-device and privileged code lives in
 `chafftafarian/wipe/` and its worker, is reached only through the
@@ -307,7 +307,7 @@ code run under the chaff safety contract's assumptions.
 
 ## 5. Packaging, testing, CI
 
-- **Packaging**: `packaging/appimage.sh` — PyInstaller `--onedir
+- **Packaging**: `packaging/appimage.sh`: PyInstaller `--onedir
   --windowed`, `.desktop` (Categories=System;Filesystem), linuxdeploy,
   smoke test via `--appimage-extract-and-run --screenshot drives` plus
   `--selftest-wipe-plan` (builds a plan from bundled fixture output; no
@@ -330,9 +330,9 @@ code run under the chaff safety contract's assumptions.
 
 1. Capability probe vs `nvme id-ctrl` output and the vendor datasheet.
 2. Dry-run plan on the scratch drive.
-3. Cancel during pass 2 — verify the write stops and the summary says
+3. Cancel during pass 2: verify the write stops and the summary says
    cancelled.
-4. Cancel during sanitize — verify `nvme sanitize-log` shows the abort
+4. Cancel during sanitize: verify `nvme sanitize-log` shows the abort
    path (sanact=0) and the drain.
 5. Full paranoid wipe with verification.
 6. Sampled verify result vs a manual spot check
@@ -351,10 +351,10 @@ code run under the chaff safety contract's assumptions.
 - nvme-sanitize(1), nvme-sanitize-log(1), nvme-id-ctrl(1) man pages
   (Debian manpages: manpages.debian.org/nvme-cli)
 - NVM Express, "Open Source NVMe Management Utility" documentation page
-  (nvmexpress.org) — sanitize-log example output (SPROG 65535, SSTAT
+  (nvmexpress.org): sanitize-log example output (SPROG 65535, SSTAT
   0x101)
 - Arch Linux BBS thread on nvme sanitize SSTAT 0x101 semantics
   (bbs.archlinux.org, "nvme sanitize concerns")
 - NIST SP 800-88 Rev. 1, Guidelines for Media Sanitization
-- video-hls Control Room (its `apps/desktop` tree) —
+- video-hls Control Room (its `apps/desktop` tree):
   bridge architecture, screenshot harness, AppImage packaging

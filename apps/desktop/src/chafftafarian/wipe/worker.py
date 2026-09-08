@@ -1,9 +1,9 @@
-"""worker.py — the pkexec entry. Runs as root, headless, Qt-free.
+"""worker.py: the pkexec entry. Runs as root, headless, Qt-free.
 
 Protocol: `--config PATH` points at a JSON file the GUI wrote; events flow
 as JSONL on stdout (see protocol.py); exit 0 for completed or cleanly
 cancelled, 1 for anything that failed or refused. The worker re-validates
-the config, re-resolves the device, and re-runs the safety gate — it never
+the config, re-resolves the device, and re-runs the safety gate: it never
 trusts the unprivileged side. The config file and its directory are
 deleted once read (the control_dir survives for cancel signalling until
 the GUI tears it down).
@@ -47,7 +47,7 @@ def main(config_path: Path) -> int:
         cfg = WipeConfig.from_dict(raw)
         emit_event("hello", pid=os.getpid(), device=cfg.device, uid=os.getuid())
         if os.getuid() != 0:
-            emit_event("error", text="not running as root — invoke via pkexec")
+            emit_event("error", text="not running as root: invoke via pkexec")
             emit_event("done", ok=False, cancelled=False)
             return 1
 
@@ -69,7 +69,7 @@ def main(config_path: Path) -> int:
     except Exception:
         traceback.print_exc(file=sys.stderr)
         try:
-            emit_event("error", text="worker crashed — see journal/stderr")
+            emit_event("error", text="worker crashed: see journal/stderr")
             emit_event("done", ok=False, cancelled=False)
         except Exception:
             pass

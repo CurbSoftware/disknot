@@ -1,9 +1,9 @@
-"""nvme.py — parse nvme-cli's identify and sanitize-status output.
+"""nvme.py: parse nvme-cli's identify and sanitize-status output.
 
 Decode tables (validated against the nvme-cli documentation; see
 docs/SPEC.md "Sanitize decode tables" for sources and the fixture caveat):
 
-SANICAP (bitfield in id-ctrl; NVMe 2.0 bit order — NVMe 1.4 swapped the
+SANICAP (bitfield in id-ctrl; NVMe 2.0 bit order: NVMe 1.4 swapped the
 crypto/overwrite bits, which the SPEC documents as a hardware checklist
 item, not something to guess at runtime):
   bit 0  block erase supported
@@ -22,7 +22,7 @@ SSTAT (sanitize status log), bits [2:0] = state of the most recent sanitize:
   0b010  completed unsuccessfully
   0b011  in progress
 bit 8 set means the sanitize actually modified the media (global data
-erasure happened) — 0x101 = success + media modified, the value a healthy
+erasure happened): 0x101 = success + media modified, the value a healthy
 block-erase leaves behind. SPROG is a fraction with denominator 65536.
 """
 
@@ -142,7 +142,7 @@ class SanitizeLog:
     @property
     def done(self) -> bool:
         """Poll loop terminator: the state word says the operation ended.
-        (sprog==65535 is the belt to this braces — some firmware parks the
+        (sprog==65535 is the belt to this braces: some firmware parks the
         progress register at 100% before flipping sstat.)"""
         return self.state in ("success", "failed", "never") or self.sprog >= 65535
 
@@ -180,7 +180,7 @@ def parse_sanitize_log(text: str) -> SanitizeLog:
 
 def parse_nvme_list_json(text: str) -> list[dict]:
     """Parse `nvme list -o json`: {"Devices":[{"DevicePath":..., "ModelNumber":
-    ..., ...}]}. Returns [] for anything unparsable — enumeration must never
+    ..., ...}]}. Returns [] for anything unparsable: enumeration must never
     raise."""
     import json
 

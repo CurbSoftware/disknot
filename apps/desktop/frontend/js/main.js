@@ -1,9 +1,9 @@
-// Chafftafarian — main.js
+// Chafftafarian: main.js
 // Hash router + keyboard layer + view lifecycle.
 //
 // View module contract (all views, present and future):
 //   export async function render(root) -> cleanup?  (root = #view element)
-//   cleanup() runs before the next view renders — use it to unsubscribe from
+//   cleanup() runs before the next view renders: use it to unsubscribe from
 //   the bus and stop tails.
 // Views are lazy-imported; a missing module renders the under-construction
 // panel with its exit number, so views can land independently.
@@ -59,7 +59,7 @@ function constructionPanel(route) {
   view.innerHTML =
     `<div class="construction grid-wash">` +
     `<span class="empty-code" aria-hidden="true">${route.exit}</span>` +
-    `<h2>${route.label} — under construction</h2>` +
+    `<h2>${route.label}: under construction</h2>` +
     `<p class="micro">EXIT ${route.exit} IS BEING BUILT · THE ROADWAY IS OPEN ELSEWHERE<br>` +
     `PRESS 1–6 TO REACH ANOTHER EXIT</p>` +
     `</div>`;
@@ -89,7 +89,7 @@ async function render() {
       view.innerHTML =
         `<div class="construction grid-wash">` +
         `<span class="empty-code" aria-hidden="true">${route.exit}</span>` +
-        `<h2>${route.label} — derailed</h2>` +
+        `<h2>${route.label}: derailed</h2>` +
         `<p class="micro">${String(err?.message || err)}</p></div>`;
       cleanup = null;
     }
@@ -103,7 +103,7 @@ async function render() {
   view.classList.add('view-in');
   view.scrollTop = 0;
 
-  // viewReady fires once fonts are in and a frame has painted — the
+  // viewReady fires once fonts are in and a frame has painted: the
   // screenshot harness waits on it.
   try { await document.fonts.ready; } catch {}
   requestAnimationFrame(() => {

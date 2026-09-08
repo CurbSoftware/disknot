@@ -1,5 +1,5 @@
 /* ============================================================================
-   CONTROL ROOM — base
+   CONTROL ROOM: base
    Reset, document defaults, scrollbars, selection, focus, tooltips.
    All values come from tokens.css. No hex picking.
    ========================================================================== */
@@ -96,7 +96,7 @@ code, kbd, samp { font-family: var(--font-mono); }
   animation: tip-in var(--dur-fast) var(--ease-standard) both;
 }
 
-/* Anchors near the right edge flip the tooltip so it grows leftward —
+/* Anchors near the right edge flip the tooltip so it grows leftward
    left-anchored tooltips there would poke out and open a scrollbar.
    shell.js adds .tip-end automatically on hover/focus; data-tip-end marks
    statically right-edge hosts. */
@@ -106,7 +106,7 @@ code, kbd, samp { font-family: var(--font-mono); }
   right: 0;
 }
 
-/* status-bar tooltips live at the screen bottom — flip them above their host */
+/* status-bar tooltips live at the screen bottom: flip them above their host */
 #statusbar [data-tip]::after { bottom: calc(100% + 8px); }
 
 /* -- motion courtesy -------------------------------------------------------- */

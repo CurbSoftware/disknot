@@ -1,4 +1,4 @@
-// Chafftafarian — mock.js
+// Chafftafarian: mock.js
 // Stands in for the QWebChannel bridge when ?mock=1 (or plain browser dev).
 // Payload shapes mirror BRIDGE.md 1:1 (the frozen contract) so views built
 // against the mock behave identically against Qt. Scenario data is
@@ -205,7 +205,7 @@ export async function wipeStart(config) {
   let cancelled = false;
   mock.abortWipe = () => {
     cancelled = true;
-    line('wipe.log', `${now()} [WARN] cancel requested — finishing at the next checkpoint`);
+    line('wipe.log', `${now()} [WARN] cancel requested: finishing at the next checkpoint`);
   };
 
   const totalPct = 100 / plan.passes.length;

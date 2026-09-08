@@ -4,7 +4,7 @@
 #   packaging/appimage.sh
 #
 # Adapted from video-hls Control Room's appimage.sh. Differences: there is
-# no external engine tree to bundle — the chaff core rides --paths src and
+# no external engine tree to bundle: the chaff core rides --paths src and
 # its data pack is collected explicitly; the smoke test adds
 # --selftest-wipe-plan (wipe package + decode, no devices or root).
 #
@@ -28,7 +28,7 @@ SHARE="share/$APP_NAME"
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
 
-[[ -x "$VENV_PY" ]] || die "no venv python at $VENV_PY — run: cd apps/desktop && uv sync --extra dev"
+[[ -x "$VENV_PY" ]] || die "no venv python at $VENV_PY: run: cd apps/desktop && uv sync --extra dev"
 [[ -d "$DESKTOP_APP/src/chaff_generator" ]] || die "vendored chaff core missing"
 
 # --- icon: SVG -> PNG via the venv's QtSvg -----------------------------------
@@ -75,7 +75,7 @@ build_bundle() {
   # The #1 WebEngine packaging failure is a missing helper process.
   local helper
   helper="$(find "$DIST" -type f -name QtWebEngineProcess -print -quit)"
-  [[ -n "$helper" ]] || die "QtWebEngineProcess not found under $DIST — \
+  [[ -n "$helper" ]] || die "QtWebEngineProcess not found under $DIST: \
 QtWebEngine was not collected; the AppImage would render a blank window."
   chmod +x "$helper"
 
@@ -163,7 +163,7 @@ run_linuxdeploy() {
     cat >&2 <<TODO
 
 TODO: linuxdeploy could not be downloaded (offline?).
-The AppDir is fully assembled at $APPDIR — to finish the AppImage,
+The AppDir is fully assembled at $APPDIR: to finish the AppImage,
 download into $CACHE/:
   https://github.com/linuxdeploy/linuxdeploy/releases/latest/download/linuxdeploy-x86_64.AppImage
 (chmod +x), then from $PKG_DIR run:
@@ -182,7 +182,7 @@ TODO
   log "running linuxdeploy"
   deploy --output appimage || die "linuxdeploy failed"
   grep -q QTWEBENGINE_DISABLE_SANDBOX "$APPDIR/AppRun" \
-    || die "linuxdeploy replaced our AppRun — check the built image"
+    || die "linuxdeploy replaced our AppRun: check the built image"
 
   local produced appimage="$PKG_DIR/$APP_NAME-x86_64.AppImage"
   produced="$(find "$PKG_DIR" -maxdepth 1 -name '*-x86_64.AppImage' -print -quit)"

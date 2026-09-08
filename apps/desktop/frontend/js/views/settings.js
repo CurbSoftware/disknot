@@ -1,4 +1,4 @@
-// Chafftafarian — views/settings.js
+// Chafftafarian: views/settings.js
 // EXIT 05 · SETTINGS. The small set of persisted, safety-relevant knobs.
 // Payload shapes: BRIDGE.md (settingsGet / settingsSave).
 
@@ -12,7 +12,7 @@ export async function render(root) {
   const values = {};
 
   root.innerHTML = `
-    ${pageHeader({ exit: '05', title: 'Settings', lede: 'The few knobs that persist — each one narrows or widens what the app is allowed to touch.',
+    ${pageHeader({ exit: '05', title: 'Settings', lede: 'The few knobs that persist: each one narrows or widens what the app is allowed to touch.',
                    coords: 'SAFETY · PERSISTED' })}
     <div class="card-grid">
       <div id="st-form"></div>

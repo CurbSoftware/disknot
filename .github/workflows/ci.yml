@@ -1,9 +1,9 @@
-# CI — deliberately decoupled from pushes to main: it runs when dispatched
+# CI: deliberately decoupled from pushes to main: it runs when dispatched
 # from the Actions tab (or via `gh workflow run ci.yml`). Pushing to main
 # stays quiet; releases are the release workflow's job (tags only).
 #
 # Tests + the AppImage build artifact. Device tests are fixture/fake-runner
-# based by construction — CI never touches hardware.
+# based by construction: CI never touches hardware.
 
 name: ci
 
@@ -39,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
-      - name: Build AppImage (packaging/appimage.sh — same script as local)
+      - name: Build AppImage (packaging/appimage.sh: same script as local)
         run: packaging/appimage.sh
       - uses: actions/upload-artifact@v4
         with:

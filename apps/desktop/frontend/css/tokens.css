@@ -1,9 +1,9 @@
 /* ============================================================================
-   CONTROL ROOM — design tokens
+   CONTROL ROOM: design tokens
    Extracted 1:1 from curbsoftware.com's built stylesheets (2026-08).
    Fonts: the site's exact self-hosted woff2 files, SIL OFL (texts in assets/fonts/).
    Every color/size/motion value in the app comes from here. Do not hand-pick
-   hexes in views — add a token instead.
+   hexes in views: add a token instead.
    ========================================================================== */
 
 @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 500; src: url("../assets/fonts/SpaceGrotesk-500.woff2") format("woff2"); font-display: swap; }
@@ -95,7 +95,7 @@
   --gutter: clamp(1.25rem, 0.75rem + 3vw, 3rem);
 
   /* -- shape --------------------------------------------------------------- */
-  --radius: 0;              /* sharp, utilitarian — corners come from hairlines */
+  --radius: 0;              /* sharp, utilitarian: corners come from hairlines */
   --radius-pill: 999px;
   --container: 1280px;
   --container-wide: 1440px;
@@ -121,7 +121,7 @@
   color: var(--ink-3);
 }
 
-/* Dashed lane divider — a roadway marking. */
+/* Dashed lane divider: a roadway marking. */
 .lane-divider {
   height: 1px;
   background: repeating-linear-gradient(90deg,

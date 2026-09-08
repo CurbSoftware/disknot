@@ -1,4 +1,4 @@
-// Chafftafarian — views/dispatch.js
+// Chafftafarian: views/dispatch.js
 // EXIT 06 · DISPATCH. Every departure is logged: wipe archives in the state
 // dir, chaff journals in run roots. Tails run live.
 // Payload shapes: BRIDGE.md (logsList / logRead / tailStart / tailStop).
@@ -11,7 +11,7 @@ import {
 import { logStream } from '../components/progress.js';
 
 const fmtBytes = (n) => {
-  if (n == null) return '—';
+  if (n == null) return '·';
   let f = Number(n);
   for (const u of ['B', 'KiB', 'MiB', 'GiB']) {
     if (f < 1024 || u === 'GiB') return u === 'B' ? `${f}${u}` : `${f.toFixed(1)}${u}`;

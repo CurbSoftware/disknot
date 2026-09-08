@@ -1,4 +1,4 @@
-"""app.py — QApplication + QWebEngineView window hosting the frontend.
+"""app.py: QApplication + QWebEngineView window hosting the frontend.
 
 The Api object is registered as "api" on the page's QWebChannel; the frozen
 contract is BRIDGE.md (adapted from video-hls Control Room).

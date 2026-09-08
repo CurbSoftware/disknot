@@ -1,8 +1,8 @@
-"""chaff_adapter.py — ChaffEngine on a QThread, speaking the bridge.
+"""chaff_adapter.py: ChaffEngine on a QThread, speaking the bridge.
 
 The vendored core publishes frozen-dataclass events through a callback on
 the worker thread (chaff_generator/core/events.py). This adapter re-emits
-them as Qt signals — queued connections deliver them to the GUI thread —
+them as Qt signals (queued connections deliver them to the GUI thread)
 in the two shapes the frontend consumes:
 
   chaff_event(str)  JSON object per event      -> lineReady("chaff", ...)
@@ -112,7 +112,7 @@ class ChaffWorker(QObject):
         elif isinstance(event, WarningRaised):
             self.log_line.emit(
                 f"[{_now()}] [WARN] {event.message}"
-                + (f" — {event.details}" if event.details else "")
+                + (f": {event.details}" if event.details else "")
             )
         elif isinstance(event, RunCompleted):
             status = event.result.status.value if event.result else "unknown"

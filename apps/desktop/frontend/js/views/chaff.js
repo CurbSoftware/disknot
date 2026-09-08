@@ -1,4 +1,4 @@
-// Chafftafarian — views/chaff.js
+// Chafftafarian: views/chaff.js
 // EXIT 03 · CHAFF. Configure a run, preflight it, generate, watch it fill.
 // Payload shapes: BRIDGE.md (chaffPreflight, chaffStart, chaff/chaff.log
 // channels, chaff.summary report).
@@ -17,7 +17,7 @@ const LAYOUTS = ['realistic', 'simple', 'flat'];
 const COMPLETIONS = ['keep', 'delete', 'trash'];
 
 const fmtBytes = (n) => {
-  if (n == null) return '—';
+  if (n == null) return '·';
   let f = Number(n);
   for (const u of ['B', 'KiB', 'MiB', 'GiB', 'TiB']) {
     if (f < 1024 || u === 'TiB') return u === 'B' ? `${f}${u}` : `${f.toFixed(1)}${u}`;
@@ -25,7 +25,7 @@ const fmtBytes = (n) => {
   }
   return `${n}B`;
 };
-const fmtInt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+const fmtInt = (n) => (n == null ? '·' : Number(n).toLocaleString());
 
 // -- tiny form DSL ------------------------------------------------------------
 
@@ -63,7 +63,7 @@ export async function render(root) {
       <div class="section-head">
         <span class="section-num" aria-hidden="true">R</span>
         <h2>Run in progress</h2>
-        <span class="micro" id="ch-run-meta">—</span>
+        <span class="micro" id="ch-run-meta">·</span>
         <span class="grow"></span>
         <span id="ch-controls"></span>
       </div>
@@ -110,7 +110,7 @@ export async function render(root) {
         ${field('Completion', select('ch-completion', COMPLETIONS, form.completion), 'What happens to the run when generation completes.')}
       </div>
       <div style="margin-top:1rem;display:flex;gap:0.6rem">
-        ${btn({ label: 'Preflight', id: 'ch-preflight-btn', tip: 'Check writability, free space, and estimate — writes nothing' })}
+        ${btn({ label: 'Preflight', id: 'ch-preflight-btn', tip: 'Check writability, free space, and estimate: writes nothing' })}
         ${btn({ label: 'Generate', kind: 'primary', id: 'ch-start', tip: 'Start the run' })}
       </div>`,
     });
@@ -173,7 +173,7 @@ export async function render(root) {
       ['FREE NOW', raw(`<span class="mono">${fmtBytes(out.free_bytes)}</span>`)],
       ['RESERVE', raw(`<span class="mono">${fmtBytes(out.reserve_bytes)}</span>`)],
       ['EST FILES', raw(`<span class="mono">${fmtInt(out.estimated_file_count)}</span>`)],
-      ['FORMATS', raw(`<span class="mono">${(out.formats || []).join(' · ') || '—'}</span>`)],
+      ['FORMATS', raw(`<span class="mono">${(out.formats || []).join(' · ') || '·'}</span>`)],
     ];
     if (out.projected_remaining_bytes != null) {
       rows.push(['REMAINING AFTER', raw(`<span class="mono">${fmtBytes(out.projected_remaining_bytes)}</span>`)]);

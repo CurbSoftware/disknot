@@ -1,4 +1,4 @@
-"""orchestrator.py — sequence the wipe passes, safely.
+"""orchestrator.py: sequence the wipe passes, safely.
 
 Runs inside the root worker (and, with a FakeToolRunner and a temp-file
 "device", in tests). Re-runs the safety gate before every pass, monitors
@@ -127,7 +127,7 @@ class WipeOrchestrator:
                     self.emit(
                         "warning",
                         text=(
-                            "sanitize abort command failed — the controller may "
+                            "sanitize abort command failed: the controller may "
                             "finish anyway: " + abort.stderr.strip()
                         ),
                     )
@@ -146,7 +146,7 @@ class WipeOrchestrator:
                 if entry.state == "failed":
                     raise RuntimeError(
                         "sanitize completed unsuccessfully (sstat="
-                        f"0x{entry.sstat:x}) — see TROUBLESHOOTING"
+                        f"0x{entry.sstat:x}): see TROUBLESHOOTING"
                     )
                 self.emit(
                     "log",
@@ -156,7 +156,7 @@ class WipeOrchestrator:
                 )
                 return
             time.sleep(SANITIZE_POLL_S)
-        raise RuntimeError("sanitize exceeded 24h — power-cycle territory; see TROUBLESHOOTING")
+        raise RuntimeError("sanitize exceeded 24h: power-cycle territory; see TROUBLESHOOTING")
 
     def _drain_sanitize(self, dev: DeviceInfo) -> None:
         """After sanact=0, wait until the status word stops saying
@@ -206,7 +206,7 @@ class WipeOrchestrator:
             return summary
 
         if self.cfg.confirmation_word != "DESTROY" or self.cfg.confirmation_device != dev.path:
-            summary.errors.append("confirmation mismatch — refusing")
+            summary.errors.append("confirmation mismatch: refusing")
             return summary
 
         verdict = check_device(

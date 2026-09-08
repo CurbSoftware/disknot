@@ -1,7 +1,7 @@
-"""plan.py — build the pass table before anything destructive happens.
+"""plan.py: build the pass table before anything destructive happens.
 
 The paranoid plan reproduces secure_wipe.sh v2.1.0's six passes exactly:
-sanitize, zeros, ones, zeros, sanitize, zeros — sanitize passes dropped
+sanitize, zeros, ones, zeros, sanitize, zeros: sanitize passes dropped
 (with a note) when the controller reports no sanitize support. A quick
 plan (sanitize + final zeros) exists for sane re-use of already-wiped
 drives; verification is an optional trailing pass.
@@ -68,7 +68,7 @@ def build_plan(
     if not caps.supported:
         plan.notes.append(
             "controller reports no sanitize support (sanicap=0): "
-            "overwrite passes only — remapped cells may retain data"
+            "overwrite passes only: remapped cells may retain data"
         )
 
     if quick:
@@ -81,17 +81,17 @@ def build_plan(
 
     # paranoid six, bracketed like secure_wipe.sh
     if caps.supported:
-        add("sanitize", "NVMe Sanitize — first hardware erase", None)
+        add("sanitize", "NVMe Sanitize: first hardware erase", None)
     else:
         plan.notes.append("pass 1 (sanitize) skipped: not supported")
     add("zeros", "Overwrite with zeros", write_est)
     add("ones", "Overwrite with 0xFF", write_est)
     add("zeros", "Overwrite with zeros again", write_est)
     if caps.supported:
-        add("sanitize", "NVMe Sanitize — second hardware erase", None)
+        add("sanitize", "NVMe Sanitize: second hardware erase", None)
     else:
         plan.notes.append("pass 5 (sanitize) skipped: not supported")
-    add("zeros", "Final zero pass — leaves the drive zeroed", write_est)
+    add("zeros", "Final zero pass: leaves the drive zeroed", write_est)
     if verify:
         add("verify", "Sampled read-back verification", write_est // 8)
     return plan

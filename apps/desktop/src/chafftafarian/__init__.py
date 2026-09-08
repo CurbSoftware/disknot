@@ -1,4 +1,4 @@
-"""Chafftafarian — chaff generation, NVMe tools, and drive sanitization."""
+"""Chafftafarian: chaff generation, NVMe tools, and drive sanitization."""
 
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
-"""protocol.py — the JSONL event contract between the root wipe worker and
+"""protocol.py: the JSONL event contract between the root wipe worker and
 the GUI (and the mock, and the tests).
 
 One JSON object per line on the worker's stdout, flushed per line. The
 first line is always `hello`; the last is always `done`. Tracebacks go to
-stderr — stdout carries nothing but events.
+stderr: stdout carries nothing but events.
 """
 
 from __future__ import annotations

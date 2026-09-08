@@ -2,7 +2,7 @@
 real device: lsblk/nvme/findmnt outputs are scripted into FakeToolRunner,
 and the "device" the PatternWriter hits is a temp file.
 
-CI MUST NEVER run these against real hardware — they are constructed so it
+CI MUST NEVER run these against real hardware: they are constructed so it
 cannot (dev_dir points into tmp_path)."""
 
 from __future__ import annotations

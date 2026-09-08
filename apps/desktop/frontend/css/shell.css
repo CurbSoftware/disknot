@@ -1,5 +1,5 @@
 /* ============================================================================
-   CONTROL ROOM — shell
+   CONTROL ROOM: shell
    App frame: sidebar (signage gantry), view column, status bar (road deck).
    ========================================================================== */
 
@@ -43,7 +43,7 @@
   color: var(--ink-4);
 }
 
-/* nav: one exit per view. Mile-marker stack — mono exit number over label. */
+/* nav: one exit per view. Mile-marker stack: mono exit number over label. */
 #nav {
   flex: 1;
   min-height: 0;
@@ -164,7 +164,7 @@
 #sb-engine, #sb-disk { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #sb-clock { color: var(--ink-2); }
 
-/* busy pulse — the amber heartbeat of a route in progress */
+/* busy pulse: the amber heartbeat of a route in progress */
 @keyframes sb-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }

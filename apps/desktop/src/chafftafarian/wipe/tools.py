@@ -1,4 +1,4 @@
-"""tools.py — the one seam every external command goes through.
+"""tools.py: the one seam every external command goes through.
 
 Device code never calls subprocess directly: inventory, safety, and the
 orchestrator all take a ToolRunner, so tests script behavior with

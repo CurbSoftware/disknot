@@ -1,4 +1,4 @@
-// Chafftafarian — views/sanitize.js
+// Chafftafarian: views/sanitize.js
 // EXIT 02 · SANITIZE. Plan it, confirm it by typing DESTROY plus the exact
 // device name, watch every pass. Payload shapes: BRIDGE.md (wipePlan,
 // wipeStart, wipe/wipe.log channels, wipe.summary report).
@@ -12,7 +12,7 @@ import { logStream } from '../components/progress.js';
 import * as edu from '../content.js';
 
 const fmtBytes = (n) => {
-  if (n == null) return '—';
+  if (n == null) return '·';
   let f = Number(n);
   for (const u of ['B', 'KiB', 'MiB', 'GiB', 'TiB']) {
     if (f < 1024 || u === 'TiB') return u === 'B' ? `${f}${u}` : `${f.toFixed(1)}${u}`;
@@ -53,10 +53,10 @@ export async function render(root) {
   const stream = logStream($('#sn-log'));
 
   function renderForm() {
-    const options = ['<option value="">— choose a device —</option>']
+    const options = ['<option value="">· choose a device ·</option>']
       .concat(devices.map((d) =>
         `<option value="${esc(d.path)}"${d.path === form.device ? ' selected' : ''}>` +
-        `${esc(d.path)} — ${esc(d.model || d.kname)} (${fmtBytes(d.size_bytes)})` +
+        `${esc(d.path)}: ${esc(d.model || d.kname)} (${fmtBytes(d.size_bytes)})` +
         `${d.os_disk ? ' · OS DISK' : ''}</option>`));
     $('#sn-form').innerHTML = card({
       num: '01', title: 'Target and plan', eyebrow: 'WHAT WILL BE DESTROYED',
@@ -76,7 +76,7 @@ export async function render(root) {
         </div>
       </div>
       <div style="margin-top:1rem">
-        ${btn({ label: 'Build the plan', kind: 'primary', id: 'sn-plan-btn', tip: 'Probe capabilities and compute passes — writes nothing' })}
+        ${btn({ label: 'Build the plan', kind: 'primary', id: 'sn-plan-btn', tip: 'Probe capabilities and compute passes: writes nothing' })}
       </div>`,
     });
     $('#sn-device').addEventListener('change', (e) => { form.device = e.target.value; });
@@ -187,7 +187,7 @@ export async function render(root) {
       const prog = progressByPass[p.n];
       const pct = prog != null ? Math.round(prog) : (progressByPass.done?.includes(p.n) ? 100 : 0);
       return `<div class="plane"><div class="plane-top">` +
-        `<span class="plane-label">PASS ${p.n} · ${esc(p.kind.toUpperCase())} — ${esc(p.detail)}</span>` +
+        `<span class="plane-label">PASS ${p.n} · ${esc(p.kind.toUpperCase())}: ${esc(p.detail)}</span>` +
         `<span class="plane-pct">${pct}%</span></div>` +
         `<div class="plane-track"><i style="width:${pct}%"></i></div></div>`;
     }).join('') + `

@@ -1,10 +1,10 @@
-"""worker_spawn.py — launch the root wipe worker through pkexec, and read
+"""worker_spawn.py: launch the root wipe worker through pkexec, and read
 its JSONL event stream.
 
 Why `pkexec env ...`: pkexec scrubs the environment, so anything the child
 needs rides argv or an explicit `env` invocation. In an AppImage the
-runtime FUSE-mounts as the invoking user — a root re-exec fails before
-AppRun ever runs — so the frozen form sets APPIMAGE_EXTRACT_AND_RUN=1,
+runtime FUSE-mounts as the invoking user: a root re-exec fails before
+AppRun ever runs: so the frozen form sets APPIMAGE_EXTRACT_AND_RUN=1,
 which makes the runtime extract to a temp dir instead of mounting. The
 extract costs seconds; a wipe costs hours.
 

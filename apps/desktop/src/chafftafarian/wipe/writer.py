@@ -1,4 +1,4 @@
-"""writer.py — the dd replacement: pattern writes with real progress,
+"""writer.py: the dd replacement: pattern writes with real progress,
 between-block cancellation, and sampled read-back verification.
 
 Why not shell out to `dd status=progress`: parsing a child's stderr for
@@ -59,7 +59,7 @@ def write_pattern(
     """Write `pattern` over [0, total_bytes) of `path` in 1 MiB blocks.
 
     Tries O_DIRECT with an mmap'd, page-aligned buffer (kernel/FS may
-    refuse with EINVAL — zfs, some partitions — and we fall back to
+    refuse with EINVAL (zfs, some partitions), so we fall back to
     buffered writes with periodic fdatasync). The final ENOSPC when the
     device ends mid-block is normal and reported, not raised.
     """
@@ -100,7 +100,7 @@ def write_pattern(
                         and total_bytes - written < BLOCK_SIZE
                     ):
                         enospc = True
-                        break  # the final partial block cannot fit — normal
+                        break  # the final partial block cannot fit: normal
                     raise
                 written += n
                 blocks += 1

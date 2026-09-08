@@ -1,4 +1,4 @@
-// Chafftafarian — api.js
+// Chafftafarian: api.js
 // Async facade over the core bridge. Two backends, one surface:
 //
 //   Qt runtime (no ?mock): loads qrc:///qtwebchannel/qwebchannel.js, opens a
@@ -19,7 +19,7 @@ const MOCK = new URLSearchParams(location.search).has('mock') ||
 
 export const isMock = MOCK;
 
-// The frozen bridge contract — every slot the core exposes.
+// The frozen bridge contract: every slot the core exposes.
 const SLOTS = [
   'getBootstrap', 'deviceList', 'deviceDetail', 'wipePlan', 'wipeStart',
   'wipeAbort', 'chaffPreflight', 'chaffStart', 'chaffCancel', 'chaffPause',

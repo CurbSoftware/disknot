@@ -1,15 +1,15 @@
-// Control Room — components/progress.js
+// Control Room: components/progress.js
 // Live-output primitives: meter, progressLane, logStream.
 
 import { esc } from './ui.js';
 
-// meter(pct) — thin amber bar on an ink rail.
+// meter(pct): thin amber bar on an ink rail.
 export function meter(pct) {
   const p = Math.max(0, Math.min(100, Math.round(pct)));
   return `<span class="meter" role="progressbar" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100"><i style="width:${p}%"></i></span>`;
 }
 
-// progressLane({label, pct, status}) — a highway lane filling with amber.
+// progressLane({label, pct, status}): a highway lane filling with amber.
 export function progressLane({ label, pct, status = '' }) {
   const p = Math.max(0, Math.min(100, Math.round(pct)));
   return `<div class="plane">` +
@@ -20,7 +20,7 @@ export function progressLane({ label, pct, status = '' }) {
     `</div>`;
 }
 
-// logStream(el, {height}) — auto-scrolling log box.
+// logStream(el, {height}): auto-scrolling log box.
 // Levels are parsed from [TAG] markers; untagged lines render as RAW (dim).
 // Returns { append, set, clear, setLevels, el }. Buffer is capped at 4000 lines.
 const LINE_RE = /^(\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\])?\s*(?:\[(INFO|START|DONE|SKIP|WARN|ERROR|FATAL)\])?\s*(.*)$/;
@@ -55,7 +55,7 @@ export function logStream(el, { minLines = 12 } = {}) {
     el.innerHTML = lines
       .filter((l) => !hidden.has(l.tag || 'RAW'))
       .map(fmt)
-      .join('') || `<span class="ln raw">—</span>`;
+      .join('') || `<span class="ln raw">·</span>`;
     if (stick) el.scrollTop = el.scrollHeight;
   }
 

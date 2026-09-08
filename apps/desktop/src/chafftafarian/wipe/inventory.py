@@ -1,4 +1,4 @@
-"""inventory.py — enumerate block devices via lsblk (JSON, byte sizes),
+"""inventory.py: enumerate block devices via lsblk (JSON, byte sizes),
 enriched with nvme-cli detail when available.
 
 lsblk -Jb -o NAME,SIZE,TYPE,KNAME,MODEL,SERIAL,TRAN,MOUNTPOINTS,CHILDREN
@@ -51,7 +51,7 @@ class DeviceInfo:
         return any(p.mountpoints for p in self.partitions)
 
     def mountpoints(self) -> list[str]:
-        """Real mount points only — "[SWAP]" is reported via the swap flag."""
+        """Real mount points only: "[SWAP]" is reported via the swap flag."""
         out: list[str] = []
         for p in self.partitions:
             out.extend(mp for mp in p.mountpoints if mp != "[SWAP]")
@@ -122,7 +122,7 @@ def list_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> list[DeviceInf
     """All whole disks lsblk reports. Never raises; an lsblk failure yields
     []. zram devices (RAM-backed swap) are excluded: wiping RAM disks is
     meaningless and only clutters the drive bay. `dev_dir` rewrites the
-    /dev prefix — tests point it at a temp dir whose "devices" are files."""
+    /dev prefix: tests point it at a temp dir whose "devices" are files."""
     import json
 
     result = runner.run(_LSBLK_ARGS, timeout=15)

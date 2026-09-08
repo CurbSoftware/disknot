@@ -1,4 +1,4 @@
-// Chafftafarian — views/drives.js
+// Chafftafarian: views/drives.js
 // EXIT 01 · DRIVES. The drive bay: what is attached, what it can survive,
 // and what it is doing right now. Payload shapes: BRIDGE.md (deviceList).
 
@@ -9,7 +9,7 @@ import {
 } from '../components/ui.js';
 
 const fmtBytes = (n) => {
-  if (n == null) return '—';
+  if (n == null) return '·';
   let f = Number(n);
   for (const u of ['B', 'KiB', 'MiB', 'GiB', 'TiB']) {
     if (f < 1024 || u === 'TiB') return u === 'B' ? `${f}${f % 1 ? '' : ''}${u}` : `${f.toFixed(f >= 100 ? 0 : 1)}${u}`;
@@ -65,7 +65,7 @@ export async function render(root) {
       $('#dr-list').innerHTML = emptyState({
         code: '01',
         headline: 'No disks visible',
-        guidance: 'LSBLK REPORTED NO WHOLE DISKS — ATTACH A DRIVE AND RESCAN, OR CHECK PERMISSIONS',
+        guidance: 'LSBLK REPORTED NO WHOLE DISKS: ATTACH A DRIVE AND RESCAN, OR CHECK PERMISSIONS',
       });
       return;
     }
@@ -79,11 +79,11 @@ export async function render(root) {
         (dev.mounted ? chip('warn', 'MOUNTED') : chip('idle', 'UNMOUNTED'))),
       children: kv([
         ['SIZE', raw(`<span class="mono">${fmtBytes(dev.size_bytes)}</span>`)],
-        ['SERIAL', raw(`<span class="mono">${esc(dev.serial || '—')}</span>`)],
-        ['MOUNTS', raw(`<span class="mono">${dev.mountpoints?.length ? esc(dev.mountpoints.join(' · ')) : '—'}</span>`)],
+        ['SERIAL', raw(`<span class="mono">${esc(dev.serial || '·')}</span>`)],
+        ['MOUNTS', raw(`<span class="mono">${dev.mountpoints?.length ? esc(dev.mountpoints.join(' · ')) : '·'}</span>`)],
         ['SANITIZE', sanitizeChips(dev)],
       ]) + (dev.os_disk
-        ? '<p class="micro" style="color:var(--danger)">THIS DISK HOSTS THE RUNNING OS — THE SANITIZE VIEW WILL ALWAYS REFUSE IT</p>'
+        ? '<p class="micro" style="color:var(--danger)">THIS DISK HOSTS THE RUNNING OS: THE SANITIZE VIEW WILL ALWAYS REFUSE IT</p>'
         : `<div style="margin-top:0.8rem">
              ${btn({ label: 'Sanitize this drive…', kind: 'danger', id: `dr-go-${dev.kname}`,
                      tip: 'Open the SANITIZE view with this device preselected' })}

@@ -1,6 +1,6 @@
-// Chafftafarian — content.js
+// Chafftafarian: content.js
 // Education and safety copy. Every view imports from here; views never
-// restate an explanation. Keep strings terse, factual, and calm — the user
+// restate an explanation. Keep strings terse, factual, and calm: the user
 // is about to do something irreversible, and panic copy helps nobody.
 
 export const sanitizeVsOverwrite = {
@@ -37,7 +37,7 @@ export const seedDeterminism = {
   body:
     'One master seed derives a per-file seed for every generated file. The ' +
     'same seed, the same pack version, and the same settings reproduce a ' +
-    'byte-identical corpus on any machine — which is what makes a chaff run ' +
+    'byte-identical corpus on any machine: which is what makes a chaff run ' +
     'verifiable after the fact. Seed 0 draws a fresh random seed for you.',
 };
 
@@ -46,7 +46,7 @@ export const reserveMeaning = {
   body:
     'The engine re-reads free space between files and stops before free ' +
     'space drops below the reserve. It trusts the filesystem, not its own ' +
-    'byte counter — so an external program consuming space mid-run is ' +
+    'byte counter: so an external program consuming space mid-run is ' +
     'accounted for, not overwritten into an ENOSPC.',
 };
 
@@ -62,15 +62,15 @@ export const chaffDisclaimer = {
 };
 
 export const passTable = [
-  { pass: 1, kind: 'sanitize', detail: 'NVMe Sanitize (block erase) — controller-level' },
+  { pass: 1, kind: 'sanitize', detail: 'NVMe Sanitize (block erase): controller-level' },
   { pass: 2, kind: 'zeros', detail: 'Overwrite with zeros, 1 MiB blocks, direct' },
   { pass: 3, kind: 'ones', detail: 'Overwrite with 0xFF' },
   { pass: 4, kind: 'zeros', detail: 'Overwrite with zeros again' },
   { pass: 5, kind: 'sanitize', detail: 'Second NVMe Sanitize' },
-  { pass: 6, kind: 'zeros', detail: 'Final zero pass — leaves the drive zeroed' },
+  { pass: 6, kind: 'zeros', detail: 'Final zero pass: leaves the drive zeroed' },
 ];
 
-// Troubleshooting map — keyed by the symptom a user sees.
+// Troubleshooting map: keyed by the symptom a user sees.
 export const troubleshooting = [
   { symptom: 'pkexec dialog never appears',
     fix: 'pkexec needs a polkit agent on your desktop session. Check that polkit-gnome or the equivalent is running.' },
@@ -79,9 +79,9 @@ export const troubleshooting = [
   { symptom: 'Sanitize seems stuck',
     fix: 'Sanitize runs entirely in the controller and blocks most other admin commands while it works. Large drives take tens of minutes. To abort: nvme sanitize <dev> --sanact=0. A drive that stays wedged may need a power cycle.' },
   { symptom: 'Write pass ends with "no space left"',
-    fix: 'ENOSPC on the final block of a whole-disk write is normal — the last partial block cannot fit. It is reported, not treated as failure.' },
+    fix: 'ENOSPC on the final block of a whole-disk write is normal: the last partial block cannot fit. It is reported, not treated as failure.' },
   { symptom: 'Verification found non-matching blocks',
-    fix: 'The verify sample reads back blocks after the final pass. Mismatches after a zero pass on a drive that skipped sanitize can indicate remapped sectors — run the paranoid plan with sanitize enabled.' },
+    fix: 'The verify sample reads back blocks after the final pass. Mismatches after a zero pass on a drive that skipped sanitize can indicate remapped sectors: run the paranoid plan with sanitize enabled.' },
 ];
 
 // Shared micro-copy

@@ -1,7 +1,7 @@
-"""api.py — the QWebChannel bridge object.
+"""api.py: the QWebChannel bridge object.
 
 Exactly one ``Api(QObject)`` is registered as "api" on the channel. Slots are
-QString in / QString out, payloads JSON — the frozen contract is BRIDGE.md.
+QString in / QString out, payloads JSON: the frozen contract is BRIDGE.md.
 Slots run on the GUI thread; worker threads only ever emit signals.
 
 Chafftafarian has no external engine process to drive: the vendored chaff
@@ -478,7 +478,7 @@ class Api(QObject):
             return _dumps({"ok": False, "error": "not running"})
         if not self._wipe_proc.request_cancel():
             return _dumps({"ok": False, "error": "cancel already sent"})
-        self.lineReady.emit("wipe.log", "[CTRL] cancel requested — stopping at the next checkpoint")
+        self.lineReady.emit("wipe.log", "[CTRL] cancel requested: stopping at the next checkpoint")
         return _dumps({"ok": True, "error": None})
 
     # ------------------------------------------------ runs / verify / cleanup

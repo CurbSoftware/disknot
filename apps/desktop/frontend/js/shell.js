@@ -1,11 +1,11 @@
-// Chafftafarian — shell.js
+// Chafftafarian: shell.js
 // The app chassis: a tiny pub-sub bus, shared core state, and the status
-// bar. Views never touch the bridge for state — they read `state` and
+// bar. Views never touch the bridge for state: they read `state` and
 // subscribe to bus events:
 //
 //   bus.on('state',   fn)  core state changed (mirrored in `state`)
-//   bus.on('line',    fn)  {channel, text} — every lineReady, all channels
-//   bus.on('report',  fn)  {channel, data} — every reportReady
+//   bus.on('line',    fn)  {channel, text}: every lineReady, all channels
+//   bus.on('report',  fn)  {channel, data}: every reportReady
 //   bus.on('escape',  fn)  Esc pressed at shell level
 //
 // bus.on returns an unsubscribe; views call theirs from their cleanup.

@@ -1,4 +1,4 @@
-// Chafftafarian — views/runs.js
+// Chafftafarian: views/runs.js
 // EXIT 04 · RUNS. Every chaff run on record: inspect, verify, clean up.
 // Payload shapes: BRIDGE.md (runsList, runInspect, verifyStart / "verify"
 // report, runCleanup).
@@ -10,7 +10,7 @@ import {
 } from '../components/ui.js';
 
 const fmtBytes = (n) => {
-  if (n == null) return '—';
+  if (n == null) return '·';
   let f = Number(n);
   for (const u of ['B', 'KiB', 'MiB', 'GiB', 'TiB']) {
     if (f < 1024 || u === 'TiB') return u === 'B' ? `${f}${u}` : `${f.toFixed(1)}${u}`;
@@ -18,7 +18,7 @@ const fmtBytes = (n) => {
   }
   return `${n}B`;
 };
-const fmtInt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+const fmtInt = (n) => (n == null ? '·' : Number(n).toLocaleString());
 
 const STATUS_CHIP = {
   completed: ['ok', 'COMPLETED'], cancelled: ['warn', 'CANCELLED'],
@@ -58,7 +58,7 @@ export async function render(root) {
       $('#rn-list').innerHTML = emptyState({
         code: '04',
         headline: 'No runs on record',
-        guidance: 'GENERATE ONE FROM EXIT 03 · CHAFF — RUNS APPEAR HERE THE MOMENT THEIR MARKER FILE IS WRITTEN',
+        guidance: 'GENERATE ONE FROM EXIT 03 · CHAFF: RUNS APPEAR HERE THE MOMENT THEIR MARKER FILE IS WRITTEN',
       });
       return;
     }
@@ -96,12 +96,12 @@ export async function render(root) {
       eyebrow: (detail.root || '').toUpperCase(),
       right: raw(chip(st, label)),
       children: kv([
-        ['CREATED', raw(`<span class="mono">${esc(detail.created_at || '—')}</span>`)],
-        ['PROFILE', raw(`<span class="mono">${esc(detail.profile ?? '—')}</span>`)],
-        ['SEED', raw(`<span class="mono">${esc(detail.seed ?? '—')}</span>`)],
+        ['CREATED', raw(`<span class="mono">${esc(detail.created_at || '·')}</span>`)],
+        ['PROFILE', raw(`<span class="mono">${esc(detail.profile ?? '·')}</span>`)],
+        ['SEED', raw(`<span class="mono">${esc(detail.seed ?? '·')}</span>`)],
         ['FILES', raw(`<span class="mono">${fmtInt(detail.file_count)}</span>`)],
         ['WRITTEN', raw(`<span class="mono">${fmtBytes(detail.bytes_written)}</span>`)],
-        ['APP VERSION', raw(`<span class="mono">${esc(detail.app_version || '—')}</span>`)],
+        ['APP VERSION', raw(`<span class="mono">${esc(detail.app_version || '·')}</span>`)],
       ]) + (detail.error ? `<p class="micro" style="color:var(--amber)">${esc(detail.error)}</p>` : '') +
       (detail.largest?.length ? sectionHead({ num: 'L', title: 'Largest files' }) +
         table(['Path', 'Size'], detail.largest.map((f) => [
@@ -116,7 +116,7 @@ export async function render(root) {
           ${btn({ label: 'Verify (full)', id: 'rn-verify-full', tip: 'Size and SHA-256 of every file against the manifest' })}
           ${btn({ label: 'Verify (sample)', id: 'rn-verify-sample', tip: 'Deterministic sample of the manifest' })}
           ${btn({ label: 'Open directory', id: 'rn-open' })}
-          ${btn({ label: 'Delete run', kind: 'danger', id: 'rn-delete', tip: 'Removes the validated run root — nothing else' })}
+          ${btn({ label: 'Delete run', kind: 'danger', id: 'rn-delete', tip: 'Removes the validated run root: nothing else' })}
         </div>
         <div class="confirmbox" id="rn-confirm" hidden style="margin-top:0.8rem">
           <span class="micro">TYPE DELETE TO CONFIRM</span>
@@ -175,7 +175,7 @@ export async function render(root) {
       children: kv([
         ['CHECKED', raw(`<span class="mono">${fmtInt(data.files_checked)} of ${fmtInt(data.files_total)}</span>`)],
         ['BYTES', raw(`<span class="mono">${fmtBytes(data.bytes_verified)} of ${fmtBytes(data.bytes_expected)}</span>`)],
-        ['VERDICTS', raw(`<span class="mono">${rows.map(([k, v]) => `${v} ${k}`).join(' · ') || '—'}</span>`)],
+        ['VERDICTS', raw(`<span class="mono">${rows.map(([k, v]) => `${v} ${k}`).join(' · ') || '·'}</span>`)],
       ]) + (data.cancelled ? '<p class="micro" style="color:var(--amber)">cancelled before completion</p>' : '') +
       (data.affected || []).map((a) =>
         `<p class="micro mono" style="color:var(--danger)">${esc(a.verdict)} ${esc(a.relative_path)}</p>`).join(''),
