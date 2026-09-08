@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Chafftafarian: concentric platter rings on the dark Control Room field -->
+  <rect width="512" height="512" rx="96" fill="#100d09"/>
+  <g fill="none" stroke="#e8a33d">
+    <circle cx="256" cy="256" r="176" stroke-width="14" opacity="0.95"/>
+    <circle cx="256" cy="256" r="126" stroke-width="10" opacity="0.7"/>
+    <circle cx="256" cy="256" r="78" stroke-width="8" opacity="0.5"/>
+  </g>
+  <circle cx="256" cy="256" r="26" fill="#e8a33d"/>
+  <!-- sanitize sweep: a bright arc breaking the outer ring -->
+  <path d="M 256 80 A 176 176 0 0 1 432 256" fill="none"
+        stroke="#f4c26b" stroke-width="22" stroke-linecap="round"/>
+</svg>

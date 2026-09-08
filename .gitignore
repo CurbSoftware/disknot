@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# App packaging scratch
+/apps/desktop/dist/
+/apps/desktop/build/
+/apps/desktop/*.spec
+/packaging/cache/
+/packaging/*.AppDir/
+/packaging/*.AppImage
+/packaging/smoke/
+/packaging/icon-*.png
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Never commit generated chaff or device reports
+/Chaff_Run_*/
+chaff-run-*/
+*.chaff-manifest.json
