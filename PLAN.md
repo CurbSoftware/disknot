@@ -81,8 +81,10 @@ docs/SPEC.md is the authoritative behavior spec.
 
 - [x] packaging/appimage.sh (name, no engine tree, default-pack
       collection check, `--selftest-wipe-plan` smoke, drives screenshot)
-- [x] .github/workflows/release.yml (Linux: test job + AppImage job;
-      release on v* tags)
+- [x] CI split three ways: `./package.sh` builds + smoke-tests locally
+      (wraps packaging/appimage.sh); `ci.yml` runs on workflow_dispatch
+      only (never on pushes to main); `release.yml` on v* tags publishes
+      the Release
 
 ## Regression recipe (run from apps/desktop)
 

@@ -59,7 +59,14 @@ python -m http.server -d frontend 8765          # browser mode, then ?mock=1
 uv run chaff generate --target /tmp/x --size 1MiB   # vendored CLI
 ```
 
-Packaging: `packaging/appimage.sh` from the repo root.
+Packaging and releases:
+
+- **Local**: `./package.sh` — builds the AppImage end to end and
+  smoke-tests it (same script CI uses).
+- **CI**: `ci.yml` runs on demand only (Actions → ci → Run); pushes to
+  main do not trigger anything.
+- **Releases**: `release.yml` fires on `v*` tags — `git tag v0.1.0 && git
+  push origin v0.1.0` publishes a Release with the AppImage.
 
 Documentation: docs/SPEC.md (behavior spec, decode tables, safety model),
 PLAN.md (phases and the human-only real-device checklist),
