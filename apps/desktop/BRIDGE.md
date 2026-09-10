@@ -43,7 +43,8 @@ time across the whole app.
 ```json
 {"core": {"version": "0.1.0", "ready": true},
  "tools": {"nvme": "/usr/sbin/nvme", "pkexec": "/usr/bin/pkexec",
-           "lsblk": "/usr/bin/lsblk", "findmnt": "/usr/bin/findmnt"},
+           "lsblk": "/usr/bin/lsblk", "findmnt": "/usr/bin/findmnt",
+           "smartctl": "/usr/sbin/smartctl", "hdparm": "/usr/sbin/hdparm"},
  "busy": false, "kind": null,
  "app_settings": {"allow_non_nvme": false, "default_target": ""}}
 ```
@@ -69,16 +70,44 @@ live (set after the first successful generation).
 `sanitize` is `null` for non-NVMe or a failed probe.
 
 - `QString deviceDetail(pathOrKname)` → one device or `{"error": …}`.
+  Same object as a `deviceList` entry, plus:
+
+```json
+"last_sanitize": {"state": "success|failed|never|in-progress|unknown",
+                  "media_modified": true, "percent": 100.0},
+"smart": {"passed": true, "temperature_c": 36, "power_on_hours": 1404,
+          "firmware": "731030WD", "percentage_used": 3,
+          "available_spare": 100, "media_errors": 0},
+"smart_error": null,
+"ata": {"frozen": false, "sanitize_block": true, "sanitize_crypto": false,
+        "security_erase": true, "security_erase_enhanced": false}
+```
+
+`last_sanitize` is `null` when the probe fails or the disk is not NVMe.
+`smart` is `null` when the probe fails; `smart_error` is then
+`"missing"` | `"permission"` | `"failed"`.
+`ata` is `null` on NVMe, or when `hdparm -I` fails. It is probed only on
+`deviceDetail` and `wipePlan`, never on `deviceList`.
 
 ### Wipe
 
 - `QString wipePlan(config_json)`: config
-  `{"device", "verify"?, "quick"?, "unmount"?}` → plan:
+  `{"device", "verify"?, "quick"?, "unmount"?, "plan"?, "sanitize_action"?}`
+  → plan.
+
+  `plan` is `"paranoid"` | `"standard"` | `"quick"`. When omitted, `quick`
+  (bool) selects quick vs paranoid, matching older callers.
+  `sanitize_action` is `"block-erase"` (default), `"crypto-erase"`,
+  `"overwrite"`, `"sata-block-erase"`, `"sata-crypto"`, or
+  `"sata-secure-erase"`. NVMe uses the first three (SANACT 2 / 4 / 3).
+  SATA/USB firmware erase uses the `sata-*` values and is gated by
+  `allow_non_nvme`.
 
 ```json
 {"device": "/dev/nvme1n1", "model": "…", "size_bytes": …,
  "passes": [{"n": 1, "kind": "sanitize|zeros|ones|verify",
-             "detail": "…", "est_s": 5001|null}],
+             "detail": "…", "est_s": 5001|null,
+             "action": "block-erase"}],
  "sanitize_supported": true, "blockers": ["…"], "notes": ["…"],
  "confirmation": {"word": "DESTROY", "device": "/dev/nvme1n1"}}
 ```
@@ -92,7 +121,9 @@ live (set after the first successful generation).
 
 - `QString wipeAbort()` → `{"ok": bool, "error": …}`; cancellation lands
   at the next worker checkpoint (write block, pass boundary, or sanitize
-  poll: during sanitize the worker issues `--sanact=0`).
+  poll: during NVMe sanitize the worker issues `--sanact=0`). ATA
+  sanitize cannot be aborted from the host: the worker waits, then skips
+  remaining passes.
 
 Worker events on the `wipe` channel (one JSON per line):
 

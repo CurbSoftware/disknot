@@ -7,7 +7,8 @@ tools in one Control Room-style interface:
    (documents, email, spreadsheets, payload blobs) into self-contained,
    verifiable run directories.
 2. **Drives**: an honest inventory of attached disks: geometry, mounts,
-   transport, and what the NVMe controller actually supports.
+   transport, what the NVMe controller actually supports, last sanitize
+   status, and a read-only SMART snapshot when `smartctl` is present.
 3. **Sanitize**: whole-disk sanitization for NVMe drives: the controller
    Sanitize command bracketing overwrite passes, with sampled verification,
    live per-pass progress, and cancellation that works against a root
@@ -117,7 +118,11 @@ enriches model/serial when nvme-cli is present. RAM disks (zram), optical
 (rom), and partitions are excluded: the view lists whole disks only.
 
 Per NVMe device the controller identify data is probed:
-`nvme id-ctrl` → **sanicap**.
+`nvme id-ctrl` → **sanicap**. Opening Inspect on a drive also reads
+`nvme sanitize-log` (last SSTAT) and `smartctl -j -H -A -i` (health,
+temperature, power-on hours, NVMe wear). SMART is inspect-only: no
+self-tests, no attribute writes. Missing `smartctl` or a permission
+denial is reported as a sentence, not an exception.
 
 ### Sanitize decode tables
 
@@ -138,10 +143,17 @@ vendor datasheet when crypto-erase matters.
 
 | value | action |
 |---|---|
-| 0 | abort a running sanitize |
-| 1 | crypto erase |
-| 2 | block erase: the paranoid plan's choice |
-| 3 | overwrite (with pattern, via the overwrite action) |
+| 0 | abort a running sanitize (bash original / older nvme-cli; current nvme-cli lists 0 as reserved) |
+| 1 | exit failure mode (current nvme-cli; unused by this app) |
+| 2 | block erase: the default |
+| 3 | overwrite |
+| 4 | crypto erase |
+
+Sources: NVM Express, xnvme (`0x4` crypto), current nvme-cli, and
+`super_drive_wipe` (`nvme sanitize -a 4` then `-a 2`). This app still
+issues `--sanact=0` on cancel and before starting if SSTAT is already
+in-progress, matching the bash original. Do not switch abort to SANACT=1
+without a hardware check.
 
 **SSTAT** (sanitize status log, bits [2:0] = state of the most recent
 sanitize):
@@ -174,16 +186,37 @@ References.
 
 | # | pass | note |
 |---|---|---|
-| 1 | NVMe Sanitize (block erase) | skipped, noted, when sanicap=0 |
+| 1 | NVMe Sanitize | skipped, noted, when no method is supported |
 | 2 | overwrite zeros, 1 MiB blocks | direct I/O when accepted |
 | 3 | overwrite 0xFF | |
 | 4 | overwrite zeros | |
-| 5 | NVMe Sanitize (second) | skipped, noted, when sanicap=0 |
+| 5 | NVMe Sanitize (second) | skipped, noted, when no method is supported |
 | 6 | overwrite zeros | leaves the drive zeroed |
 
-**Quick**: one sanitize + one zero pass. Optional trailing **verify** pass
-either way. Rationale for the bracketing: the controller erase reaches
-cells the host cannot address; the overwrite passes cover drives or moments
+**Standard**: one sanitize, then zeros, then 0xFF. Less wear than paranoid.
+
+**Quick**: one sanitize + one zero pass.
+
+Optional trailing **verify** pass on any plan. Sanitize method is block
+erase (SANACT=2) by default, or crypto erase (SANACT=4) / controller
+overwrite (SANACT=3) when the controller reports the bit and the user
+selects it. If the requested method is missing, the plan falls back to
+another supported method and notes that. If SSTAT is already
+in-progress, the plan notes that starting will abort it first
+(`--sanact=0`), then run.
+
+**SATA/USB** (settings: allow non-NVMe devices): firmware erase via
+`hdparm` when identify reports it. Methods: sanitize block erase,
+sanitize crypto scramble, opt-in security-erase (temporary password
+`p`; interruption can leave the drive locked). Frozen drives: firmware
+erase is refused with a sentence; overwrite passes still run. This app
+does not suspend or hotplug to thaw a drive. ATA sanitize cannot be
+aborted from the host: cancel waits for the controller, then skips
+remaining passes. USB sticks with no ATA caps get overwrite passes
+only. OS-disk and swap remain hard refusals.
+
+Rationale for the bracketing: the controller erase reaches cells
+the host cannot address; the overwrite passes cover drives or moments
 where sanitize is unavailable and make the end state inspectable.
 
 ### 3.2 Execution model
@@ -196,16 +229,20 @@ where sanitize is unavailable and make the end state inspectable.
   progress, a cancellation checkpoint per block, and testability.
 - Sanitize monitoring polls `nvme sanitize-log` only: other admin
   commands fail while a sanitize is in flight. Poll every 5 s; a sanitize
-  exceeding 24 h is reported as power-cycle territory.
+  exceeding 24 h is reported as power-cycle territory. If SSTAT is already
+  in-progress when a sanitize pass starts, the worker issues `--sanact=0`,
+  drains, then starts the planned action.
 - Verification samples the first, middle, and last 4 KiB blocks plus a
   seeded deterministic random sample (default 64 blocks) and requires all
   to match the expected pattern. Sampling is sampling: it proves the
   sampled blocks, not the whole device.
 - Cancellation: the GUI touches a `cancel` file in a 0700 control
   directory it created; the root worker checks it between write blocks,
-  between passes, and on every sanitize poll. Cancel during sanitize
+  between passes, and on every sanitize poll. Cancel during NVMe sanitize
   issues `--sanact=0` and drains the status log (bounded to 5 minutes;
-  an aborted sanitize can leave firmware opinionated).
+  an aborted sanitize can leave firmware opinionated). Cancel during ATA
+  sanitize waits for hdparm `--sanitize-status` to leave SD2, then skips
+  remaining passes.
 
 ### 3.3 Privilege model
 
@@ -262,7 +299,7 @@ a time across the whole app (chaff or wipe, never both).
 | No verification | optional sampled read-back pass |
 | dd exit codes only warned | write failures abort the wipe |
 | No protection against extra args (`DRIVE=$1`) | config-file protocol, re-validated |
-| Fixed 6-pass only | paranoid / quick / verify-selected plans |
+| Fixed 6-pass only | paranoid / standard / quick, optional verify, SANACT=4 crypto-erase and SANACT=3 overwrite |
 
 ---
 
@@ -278,7 +315,9 @@ Control Room pattern (from video-hls), adapted:
   `worker_spawn.py` (pkexec launch + JSONL reader).
 - **Headless wipe package** `src/chafftafarian/wipe/`: `tools.py` (the
   one subprocess seam: ToolRunner protocol, real + fake runners),
-  `inventory.py`, `nvme.py` (parsers), `safety.py`, `plan.py`,
+  `inventory.py`, `nvme.py` (parsers), `ata.py` (hdparm identify / sanitize),
+  `smart.py` (smartctl JSON snapshot),
+  `safety.py`, `plan.py`,
   `writer.py`, `orchestrator.py`, `protocol.py` (JSONL contract),
   `worker.py` (root entry). Qt-free.
 - **Vendored chaff core** `src/chaff_generator/`: unmodified except the

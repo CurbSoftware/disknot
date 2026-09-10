@@ -10,11 +10,12 @@ item, not something to guess at runtime):
   bit 1  crypto erase supported
   bit 2  overwrite supported
 
-SANACT (sanitize command action):
-  0  abort a running sanitize
-  1  crypto erase
-  2  block erase        (the paranoid plan's choice)
+SANACT (sanitize command action; NVMe spec / current nvme-cli / xnvme):
+  0  abort a running sanitize (bash original; current nvme-cli lists 0 reserved)
+  1  exit failure mode (unused by this app)
+  2  block erase        (the default)
   3  overwrite
+  4  crypto erase
 
 SSTAT (sanitize status log), bits [2:0] = state of the most recent sanitize:
   0b000  never sanitized
@@ -34,18 +35,26 @@ from .tools import ToolResult
 
 _SANITIZE_ACTIONS = {
     "abort": 0,
-    "crypto-erase": 1,
+    "exit-failure": 1,
     "block-erase": 2,
     "overwrite": 3,
+    "crypto-erase": 4,
 }
+
+NVME_ACTIONS = ("block-erase", "crypto-erase", "overwrite")
+
+
+def sanact_for(action: str) -> int:
+    """SANACT integer for a named action. Raises ValueError if unknown."""
+    try:
+        return _SANITIZE_ACTIONS[action]
+    except KeyError:
+        raise ValueError(f"unknown sanitize action {action!r}") from None
 
 
 def sanitize_command(device: str, action: str, *, no_dealloc: bool = False) -> list[str]:
     """nvme sanitize argv for one action. `abort` maps to SANACT 0."""
-    try:
-        sanact = _SANITIZE_ACTIONS[action]
-    except KeyError:
-        raise ValueError(f"unknown sanitize action {action!r}") from None
+    sanact = sanact_for(action)
     argv = ["nvme", "sanitize", device, f"--sanact={sanact}"]
     if no_dealloc:
         argv.append("--no-dealloc")

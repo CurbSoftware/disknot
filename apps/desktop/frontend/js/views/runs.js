@@ -8,6 +8,7 @@ import { bus } from '../shell.js';
 import {
   chip, kv, card, btn, pageHeader, sectionHead, emptyState, table, raw, esc,
 } from '../components/ui.js';
+import * as edu from '../content.js';
 
 const fmtBytes = (n) => {
   if (n == null) return '·';
@@ -31,7 +32,7 @@ export async function render(root) {
   let selected = null;
 
   root.innerHTML = `
-    ${pageHeader({ exit: '04', title: 'Runs', lede: 'Every chaff run on record: manifests, verification, and cleanup.',
+    ${pageHeader({ exit: '04', title: 'Runs', lede: edu.copy.runsLede,
                    coords: 'MANIFESTS · VERDICTS' })}
     <div id="rn-list"></div>
     <section class="section" id="rn-detail-section" hidden>
@@ -58,7 +59,7 @@ export async function render(root) {
       $('#rn-list').innerHTML = emptyState({
         code: '04',
         headline: 'No runs on record',
-        guidance: 'GENERATE ONE FROM EXIT 03 · CHAFF: RUNS APPEAR HERE THE MOMENT THEIR MARKER FILE IS WRITTEN',
+        guidance: 'GENERATE ONE FROM EXIT 03 CHAFF. RUNS APPEAR HERE WHEN THEIR MARKER FILE IS WRITTEN',
       });
       return;
     }
@@ -113,10 +114,10 @@ export async function render(root) {
       num: 'A', title: 'Actions', eyebrow: 'VERIFY AND CLEAN UP',
       children: `
         <div style="display:flex;gap:0.6rem;flex-wrap:wrap">
-          ${btn({ label: 'Verify (full)', id: 'rn-verify-full', tip: 'Size and SHA-256 of every file against the manifest' })}
-          ${btn({ label: 'Verify (sample)', id: 'rn-verify-sample', tip: 'Deterministic sample of the manifest' })}
+          ${btn({ label: 'Verify (full)', id: 'rn-verify-full', tip: 'This option hashes every file against the manifest.' })}
+          ${btn({ label: 'Verify (sample)', id: 'rn-verify-sample', tip: 'This option hashes a deterministic sample of the manifest.' })}
           ${btn({ label: 'Open directory', id: 'rn-open' })}
-          ${btn({ label: 'Delete run', kind: 'danger', id: 'rn-delete', tip: 'Removes the validated run root: nothing else' })}
+          ${btn({ label: 'Delete run', kind: 'danger', id: 'rn-delete', tip: 'This option deletes this run folder. Nothing else.' })}
         </div>
         <div class="confirmbox" id="rn-confirm" hidden style="margin-top:0.8rem">
           <span class="micro">TYPE DELETE TO CONFIRM</span>

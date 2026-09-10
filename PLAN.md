@@ -130,8 +130,7 @@ NVMe drive you are willing to destroy:
 
 - Windows build (chaff native; device ops via `wsl --mount --bare`,
   Win11-only, fragile; the Control Room WSL2 backend pattern applies)
-- Guided wipe → mkfs → mount → chaff flow (v1 documents the manual steps)
-- SANACT=1 crypto-erase and SANACT=3 overwrite actions in the plan builder
+- Guided wipe → mkfs → mount → chaff wizard (Sanitize shows next-step
+  sentences after a wipe; no automatic mkfs)
 - polkit .policy with a stable path (needs a system install, not AppImage)
-- SATA/HDD-specific guidance pages from the wiper's TODO list
 - Chaff resume, archives, corruption lab (upstream deferred features)

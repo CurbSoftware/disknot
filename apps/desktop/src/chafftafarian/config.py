@@ -90,9 +90,8 @@ DEVICE_SPECS: dict[str, FieldSpec] = {
             kind="bool",
             label="Allow non-NVMe devices",
             group="Devices",
-            help="Enables sanitize/wipe on SATA, USB and loop devices. "
-            "NVMe-only is the safe default; loop devices are how the "
-            "wipe path is tested without spare NVMe hardware.",
+            help="This switch lets wipe run on SATA, USB, and loop devices. "
+            "Leave it off unless you are testing.",
         ),
     )
 }

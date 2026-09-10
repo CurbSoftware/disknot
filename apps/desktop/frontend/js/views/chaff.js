@@ -53,7 +53,7 @@ export async function render(root) {
 
   root.innerHTML = `
     ${pageHeader({ exit: '03', title: 'Chaff', lede: edu.copy.chaffLede,
-                   coords: 'SYNTHETIC · DETERMINISTIC' })}
+                   coords: 'SYNTHETIC' })}
     <div class="card-grid">
       <div id="ch-form"></div>
       <div id="ch-preflight"></div>
@@ -87,30 +87,42 @@ export async function render(root) {
   // -- form ----------------------------------------------------------------
 
   function renderForm() {
+    const amountField = form.mode === 'exact'
+      ? field('Amount', textInput('ch-amount', form.amount, '10 GiB'),
+        'This field is the size to write. Units: B, KiB, MiB, GiB, TiB.')
+      : form.mode === 'percent_free'
+        ? field('Percent of free', textInput('ch-percent', form.percent, '50'),
+          'This field is the percent of current free space to write.')
+        : '';
+    const reserveField = field('Reserve', textInput('ch-reserve', form.reserve, '2 GB'),
+      edu.reserveMeaning.body);
     formEl.innerHTML = card({
       num: '01', title: 'Job', eyebrow: 'WHAT TO GENERATE AND WHERE',
       children: `<div class="fgrid">
         ${field('Target directory',
           `<div style="display:flex;gap:0.5rem">
              ${textInput('ch-target', form.target, '/srv/chaff')}
-             ${btn({ label: 'Browse', id: 'ch-pick', tip: 'Choose where runs live' })}
+             ${btn({ label: 'Browse', id: 'ch-pick', tip: 'Choose where run folders are created' })}
            </div>`,
-          'Every run lands in its own Chaff_Run_<date>_<id> directory here. Existing files are never touched.')}
+          'This directory holds one Chaff_Run_* folder per run. Existing files are never touched.')}
         ${field('Amount mode', `<div class="seg" id="ch-mode">
           ${['exact', 'percent_free', 'fill_until_reserve'].map((m) =>
-            `<button type="button" data-mode="${m}" class="${m === form.mode ? 'on' : ''}">${m.replace('_', ' ')}</button>`).join('')}
-        </div>`)}
-        ${field('Amount', textInput('ch-amount', form.amount, '10 GiB'), 'Size units: B, KB/KiB … TB/TiB, decimal or binary.')}
-        ${field('Percent of free', textInput('ch-percent', form.percent, '50'), 'Used by percent-free mode.')}
-        ${field('Reserve', textInput('ch-reserve', form.reserve), 'Free space that must remain after the run. The engine re-checks between files.')}
-        ${field('Profile', select('ch-profile', PROFILES, form.profile), 'Format mix, size ranges, and layout flavor.')}
-        ${field('Layout', select('ch-layout', LAYOUTS, form.layout))}
-        ${field('Seed', textInput('ch-seed', form.seed, '0 = random'), 'Same seed = byte-identical corpus, reproducible anywhere.')}
-        ${field('Types override', textInput('ch-types', form.types, 'txt,csv,json'), 'Optional comma list; overrides the profile format mix.')}
-        ${field('Completion', select('ch-completion', COMPLETIONS, form.completion), 'What happens to the run when generation completes.')}
+            `<button type="button" data-mode="${m}" class="${m === form.mode ? 'on' : ''}">${m.replaceAll('_', ' ')}</button>`).join('')}
+        </div>`, edu.MODE_DOES[form.mode])}
+        ${amountField}
+        ${reserveField}
+        ${field('Profile', select('ch-profile', PROFILES, form.profile),
+          edu.PROFILE_DOES[form.profile] || 'This profile picks the mix of file types.')}
+        ${field('Layout', select('ch-layout', LAYOUTS, form.layout),
+          edu.LAYOUT_DOES[form.layout] || '')}
+        ${field('Seed', textInput('ch-seed', form.seed, '0 = random'), edu.seedDeterminism.body)}
+        ${field('Types override', textInput('ch-types', form.types, 'txt,csv,json'),
+          'This optional comma list overrides the profile format mix.')}
+        ${field('Completion', select('ch-completion', COMPLETIONS, form.completion),
+          edu.COMPLETION_DOES[form.completion] || '')}
       </div>
       <div style="margin-top:1rem;display:flex;gap:0.6rem">
-        ${btn({ label: 'Preflight', id: 'ch-preflight-btn', tip: 'Check writability, free space, and estimate: writes nothing' })}
+        ${btn({ label: 'Preflight', id: 'ch-preflight-btn', tip: 'Check writability and free space. Writes nothing.' })}
         ${btn({ label: 'Generate', kind: 'primary', id: 'ch-start', tip: 'Start the run' })}
       </div>`,
     });
@@ -129,9 +141,9 @@ export async function render(root) {
     bind('#ch-target', 'target'); bind('#ch-amount', 'amount');
     bind('#ch-percent', 'percent'); bind('#ch-reserve', 'reserve');
     bind('#ch-seed', 'seed'); bind('#ch-types', 'types');
-    $('#ch-profile')?.addEventListener('change', (e) => { form.profile = e.target.value; });
-    $('#ch-layout')?.addEventListener('change', (e) => { form.layout = e.target.value; });
-    $('#ch-completion')?.addEventListener('change', (e) => { form.completion = e.target.value; });
+    $('#ch-profile')?.addEventListener('change', (e) => { form.profile = e.target.value; renderForm(); });
+    $('#ch-layout')?.addEventListener('change', (e) => { form.layout = e.target.value; renderForm(); });
+    $('#ch-completion')?.addEventListener('change', (e) => { form.completion = e.target.value; renderForm(); });
     $('#ch-preflight-btn')?.addEventListener('click', doPreflight);
     $('#ch-start')?.addEventListener('click', doStart);
   }
@@ -187,11 +199,11 @@ export async function render(root) {
   }
 
   eduEl.innerHTML = card({
-    num: '03', title: 'Ground rules', eyebrow: 'READ ONCE',
+      num: '03', title: 'Ground rules', eyebrow: 'ONCE',
     children: `
-      <p><strong>${esc(edu.seedDeterminism.headline)}.</strong> ${esc(edu.seedDeterminism.body)}</p>
-      <p style="margin-top:0.7rem"><strong>${esc(edu.reserveMeaning.headline)}.</strong> ${esc(edu.reserveMeaning.body)}</p>
-      <p style="margin-top:0.7rem" class="dim">${esc(edu.chaffDisclaimer.headline)}: ${esc(edu.chaffDisclaimer.body)}</p>`,
+      <p class="fact"><strong>${esc(edu.seedDeterminism.headline)}.</strong> ${esc(edu.seedDeterminism.body)}</p>
+      <p class="fact"><strong>${esc(edu.reserveMeaning.headline)}.</strong> ${esc(edu.reserveMeaning.body)}</p>
+      <p class="fact">${esc(edu.chaffDisclaimer.headline)}. ${esc(edu.chaffDisclaimer.body)}</p>`,
   });
 
   // -- run panel -----------------------------------------------------------

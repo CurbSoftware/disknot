@@ -5,6 +5,7 @@
 import { api } from '../api.js';
 import { bus } from '../shell.js';
 import { chip, card, btn, pageHeader, kv, raw, esc } from '../components/ui.js';
+import * as edu from '../content.js';
 
 export async function render(root) {
   const subs = [];
@@ -12,7 +13,7 @@ export async function render(root) {
   const values = {};
 
   root.innerHTML = `
-    ${pageHeader({ exit: '05', title: 'Settings', lede: 'The few knobs that persist: each one narrows or widens what the app is allowed to touch.',
+    ${pageHeader({ exit: '05', title: 'Settings', lede: edu.copy.settingsLede,
                    coords: 'SAFETY · PERSISTED' })}
     <div class="card-grid">
       <div id="st-form"></div>
@@ -79,7 +80,7 @@ export async function render(root) {
       ['CHAFF RUNS', raw('<span class="mono">the target directory you pick, one Chaff_Run_* per run</span>')],
       ['VENDORED CORE', raw('<span class="mono">apps/desktop/src/chaff_generator (see VENDORED.md)</span>')],
     ]) + `
-      <p class="micro" style="margin-top:0.9rem;color:var(--ink-4)">The allow-non-NVMe switch exists so the wipe path can be exercised on loop devices. Everything else about device safety is decided by the drive bay, not by settings.</p>`,
+      <p class="fact" style="margin-top:0.9rem">This switch is the only setting that widens which disks wipe may touch. OS disk, swap, and mounted refusals are not settings.</p>`,
   });
 
   data = await api.settingsGet();

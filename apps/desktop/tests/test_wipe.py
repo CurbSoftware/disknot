@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from chafftafarian.wipe import inventory, nvme, plan, protocol, safety, writer
+from chafftafarian.wipe import ata, inventory, nvme, plan, protocol, safety, smart, writer
 from chafftafarian.wipe.orchestrator import WipeConfig, WipeOrchestrator
 from chafftafarian.wipe.tools import FakeToolRunner
 
@@ -82,6 +82,19 @@ class TestNvmeParsers:
             "/dev/nvme1n1",
             "--sanact=0",
         ]
+        assert nvme.sanitize_command("/dev/nvme1n1", "crypto-erase") == [
+            "nvme",
+            "sanitize",
+            "/dev/nvme1n1",
+            "--sanact=4",
+        ]
+        assert nvme.sanitize_command("/dev/nvme1n1", "overwrite") == [
+            "nvme",
+            "sanitize",
+            "/dev/nvme1n1",
+            "--sanact=3",
+        ]
+        assert nvme.sanact_for("crypto-erase") == 4
         with pytest.raises(ValueError):
             nvme.sanitize_command("/dev/x", "nope")
 
@@ -92,6 +105,74 @@ class TestNvmeParsers:
         assert parsed[0]["DevicePath"] == "/dev/nvme0n1"
         assert nvme.parse_nvme_list_json("not json") == []
         assert nvme.parse_nvme_list_json('{"Devices": null}') == []
+
+
+# -- smart.py ------------------------------------------------------------------
+
+
+NVME_SMART_JSON = """
+{
+  "smart_status": {"passed": true},
+  "temperature": {"current": 36},
+  "power_on_time": {"hours": 1404},
+  "firmware_version": "731030WD",
+  "nvme_smart_health_information_log": {
+    "available_spare": 100,
+    "percentage_used": 3,
+    "media_errors": 0,
+    "temperature": 36
+  }
+}
+"""
+
+ATA_SMART_JSON = """
+{
+  "smart_status": {"passed": false},
+  "temperature": {"current": 41},
+  "power_on_time": {"hours": 22010},
+  "firmware_version": "CC43"
+}
+"""
+
+
+class TestSmart:
+    def test_parse_nvme_json(self):
+        snap = smart.parse_smartctl_json(NVME_SMART_JSON)
+        assert snap is not None
+        assert snap.passed is True
+        assert snap.temperature_c == 36
+        assert snap.power_on_hours == 1404
+        assert snap.percentage_used == 3
+        assert snap.available_spare == 100
+        assert snap.media_errors == 0
+        assert snap.firmware == "731030WD"
+
+    def test_parse_ata_json(self):
+        snap = smart.parse_smartctl_json(ATA_SMART_JSON)
+        assert snap is not None
+        assert snap.passed is False
+        assert snap.temperature_c == 41
+        assert snap.percentage_used is None
+
+    def test_bad_json_is_none(self):
+        assert smart.parse_smartctl_json("not json") is None
+        assert smart.parse_smartctl_json("{}") is None
+        assert smart.parse_smartctl_json("[]") is None
+
+    def test_probe_missing_tool(self):
+        runner = FakeToolRunner(FakeToolRunner.err("smartctl: command not found", rc=127))
+        snap, err = smart.probe_smart(runner, "/dev/nvme1n1")
+        assert snap is None and err == "missing"
+
+    def test_probe_permission(self):
+        runner = FakeToolRunner(FakeToolRunner.err("Permission denied", rc=2))
+        snap, err = smart.probe_smart(runner, "/dev/sda")
+        assert snap is None and err == "permission"
+
+    def test_probe_ok(self):
+        runner = FakeToolRunner(FakeToolRunner.ok(NVME_SMART_JSON))
+        snap, err = smart.probe_smart(runner, "/dev/nvme1n1")
+        assert err is None and snap["passed"] is True and snap["percentage_used"] == 3
 
 
 # -- inventory -----------------------------------------------------------------
@@ -332,6 +413,74 @@ class TestPlan:
         p = plan.build_plan(make_dev(), self.caps(), verify=True)
         assert p.passes[-1].kind == "verify"
 
+    def test_standard_three(self):
+        p = plan.build_plan(make_dev(), self.caps(), plan="standard")
+        assert [x.kind for x in p.passes] == ["sanitize", "zeros", "ones"]
+        assert p.passes[0].action == "block-erase"
+
+    def test_plan_name_wins_over_quick_flag(self):
+        p = plan.build_plan(make_dev(), self.caps(), plan="standard", quick=True)
+        assert [x.kind for x in p.passes] == ["sanitize", "zeros", "ones"]
+
+    def test_crypto_action_when_supported(self):
+        p = plan.build_plan(
+            make_dev(), self.caps(0b010), plan="quick", sanitize_action="crypto-erase"
+        )
+        assert p.passes[0].kind == "sanitize"
+        assert p.passes[0].action == "crypto-erase"
+        assert "crypto erase" in p.passes[0].detail
+
+    def test_crypto_falls_back_to_block_erase(self):
+        p = plan.build_plan(
+            make_dev(), self.caps(0b001), plan="quick", sanitize_action="crypto-erase"
+        )
+        assert p.passes[0].action == "block-erase"
+        assert any("does not support crypto erase" in n for n in p.notes)
+
+    def test_block_falls_back_to_crypto(self):
+        p = plan.build_plan(make_dev(), self.caps(0b010), plan="quick")
+        assert p.passes[0].action == "crypto-erase"
+        assert any("does not support block erase" in n for n in p.notes)
+
+    def test_overwrite_action_when_supported(self):
+        p = plan.build_plan(
+            make_dev(), self.caps(0b100), plan="quick", sanitize_action="overwrite"
+        )
+        assert p.passes[0].action == "overwrite"
+        assert "overwrite" in p.passes[0].detail
+
+    def test_in_progress_note(self):
+        p = plan.build_plan(
+            make_dev(), self.caps(), plan="quick", last_sanitize_state="in-progress"
+        )
+        assert any("already in progress" in n for n in p.notes)
+
+    def test_sata_block_erase_when_unfrozen(self):
+        dev = make_dev(kname="sdb", path="/dev/sdb", transport="sata")
+        caps = ata.AtaCaps(sanitize_block=True, sanitize_crypto=True)
+        p = plan.build_plan(dev, self.caps(0), plan="quick", ata=caps)
+        assert p.passes[0].kind == "sanitize"
+        assert p.passes[0].action == "sata-block-erase"
+
+    def test_sata_frozen_skips_firmware(self):
+        dev = make_dev(kname="sdb", path="/dev/sdb", transport="sata")
+        caps = ata.AtaCaps(frozen=True, sanitize_block=True)
+        p = plan.build_plan(
+            dev, self.caps(0), plan="quick", ata=caps, sanitize_action="sata-block-erase"
+        )
+        assert "sanitize" not in [x.kind for x in p.passes]
+        assert any("frozen" in n for n in p.notes)
+
+    def test_sata_secure_erase_opt_in(self):
+        dev = make_dev(kname="sdb", path="/dev/sdb", transport="sata")
+        caps = ata.AtaCaps(security_erase=True, security_erase_enhanced=True)
+        p = plan.build_plan(
+            dev, self.caps(0), plan="quick", ata=caps, sanitize_action="sata-secure-erase"
+        )
+        assert p.passes[0].action == "sata-secure-erase"
+        auto = plan.build_plan(dev, self.caps(0), plan="quick", ata=caps)
+        assert "sata-secure-erase" not in [x.action for x in auto.passes]
+
 
 # -- writer ---------------------------------------------------------------------------
 
@@ -388,6 +537,8 @@ class FakeSanitizeRunner(FakeToolRunner):
         super().__init__()
         self.disk_path = disk_path
         self.sanitize_sprog = 0
+        self.sanitize_started = False
+        self.preexisting_in_progress = False
         kname = disk_path.name
         self.lsblk = json.dumps(
             {
@@ -416,10 +567,22 @@ class FakeSanitizeRunner(FakeToolRunner):
             return FakeToolRunner.ok("")
         if prog == "nvme" and argv[1] == "id-ctrl":
             return FakeToolRunner.ok("sanicap : 1\n")
-        if prog == "nvme" and argv[1] == "sanitize" and "--sanact=2" in argv:
+        if prog == "nvme" and argv[1] == "sanitize" and "--sanact=0" in argv:
+            self.preexisting_in_progress = False
+            self.sanitize_started = False
+            self.sanitize_sprog = 0
+            return FakeToolRunner.ok("aborted")
+        if prog == "nvme" and argv[1] == "sanitize" and (
+            "--sanact=2" in argv or "--sanact=3" in argv or "--sanact=4" in argv
+        ):
+            self.sanitize_started = True
             self.sanitize_sprog = 1
             return FakeToolRunner.ok("sanitized")
         if prog == "nvme" and argv[1] == "sanitize-log":
+            if not self.sanitize_started:
+                if self.preexisting_in_progress:
+                    return FakeToolRunner.ok("sprog : 1000\nsstat : 0x3\n")
+                return FakeToolRunner.ok("sprog : 0\nsstat : 0x0\n")
             done = min(65535, self.sanitize_sprog)
             self.sanitize_sprog = min(65535, self.sanitize_sprog + 40000)
             return FakeToolRunner.ok(
@@ -515,6 +678,42 @@ class TestOrchestrator:
         aborts = [c for c in runner.calls if c[:2] == ["nvme", "sanitize"] and "--sanact=0" in c]
         assert aborts, "expected a sanact=0 abort"
 
+    def test_crypto_erase_issues_sanact_4(self, tmp_path):
+        cfg, device, _control = self.config(
+            tmp_path, [{"kind": "sanitize", "action": "crypto-erase"}]
+        )
+        events, emit = self.events()
+        runner = FakeSanitizeRunner(device, 1)
+        summary = WipeOrchestrator(cfg, runner, emit).run()
+        assert summary.ok, summary.errors
+        starts = [c for c in runner.calls if c[:2] == ["nvme", "sanitize"] and "--sanact=4" in c]
+        assert starts, runner.calls
+
+    def test_overwrite_issues_sanact_3(self, tmp_path):
+        cfg, device, _control = self.config(
+            tmp_path, [{"kind": "sanitize", "action": "overwrite"}]
+        )
+        runner = FakeSanitizeRunner(device, 1)
+        summary = WipeOrchestrator(cfg, runner, lambda *a, **k: None).run()
+        assert summary.ok, summary.errors
+        starts = [c for c in runner.calls if c[:2] == ["nvme", "sanitize"] and "--sanact=3" in c]
+        assert starts, runner.calls
+
+    def test_in_progress_abort_then_start(self, tmp_path):
+        cfg, device, _control = self.config(
+            tmp_path, [{"kind": "sanitize", "action": "block-erase"}]
+        )
+        events, emit = self.events()
+        runner = FakeSanitizeRunner(device, 1)
+        runner.preexisting_in_progress = True
+        summary = WipeOrchestrator(cfg, runner, emit).run()
+        assert summary.ok, summary.errors
+        aborts = [c for c in runner.calls if c[:2] == ["nvme", "sanitize"] and "--sanact=0" in c]
+        starts = [c for c in runner.calls if c[:2] == ["nvme", "sanitize"] and "--sanact=2" in c]
+        assert aborts and starts
+        texts = [e.get("text", "") for e in events if e.get("event") == "log"]
+        assert any("already in progress" in t for t in texts)
+
     def test_sanitize_failure_raises(self, tmp_path):
         cfg, device, _control = self.config(tmp_path, [{"kind": "sanitize"}])
         runner = FakeSanitizeRunner(device, 1)
@@ -528,6 +727,185 @@ class TestOrchestrator:
         runner.run = run_fail
         summary = WipeOrchestrator(cfg, runner, lambda *a, **k: None).run()
         assert not summary.ok and "unsuccessfully" in summary.errors[0]
+
+
+# -- ata.py / hdparm --------------------------------------------------------------
+
+
+HDPARM_IDENTIFY = """
+/dev/sdb:
+
+ATA device, with non-removable media
+	Model Number:       Samsung SSD 860 EVO 500GB
+Security:
+		supported
+	not	enabled
+	not	locked
+	not	frozen
+		supported: enhanced erase
+Sanitize Device:
+	Supported
+	BLOCK_ERASE_SUPPORTED
+	CRYPTO_SCRAMBLE_SUPPORTED
+"""
+
+HDPARM_IDENTIFY_FROZEN = """
+Security:
+		supported
+		frozen
+Sanitize Device:
+	BLOCK_ERASE_SUPPORTED
+"""
+
+
+class TestAtaParsers:
+    def test_identify_unfrozen(self):
+        caps = ata.parse_hdparm_identify(HDPARM_IDENTIFY)
+        assert not caps.frozen
+        assert caps.sanitize_block and caps.sanitize_crypto
+        assert caps.security_erase and caps.security_erase_enhanced
+
+    def test_identify_frozen(self):
+        caps = ata.parse_hdparm_identify(HDPARM_IDENTIFY_FROZEN)
+        assert caps.frozen
+        assert caps.sanitize_block
+        assert not caps.security_erase_enhanced
+
+    def test_not_supported_lines(self):
+        text = "\tnot\tBLOCK_ERASE_EXT command\n\tnot\tCRYPTO_SCRAMBLE_EXT command\n"
+        caps = ata.parse_hdparm_identify(text)
+        assert not caps.sanitize_block and not caps.sanitize_crypto
+
+    def test_sanitize_status_tokens(self):
+        assert ata.parse_sanitize_status("SD2: in progress").state == "in-progress"
+        assert ata.parse_sanitize_status("SD0: success").state == "success"
+        assert ata.parse_sanitize_status("SD1: failed").state == "failed"
+        assert ata.parse_sanitize_status("Sanitize not supported").state == "unsupported"
+
+    def test_command_builders(self):
+        assert ata.sanitize_block_erase_command("/dev/sdb")[2] == "--sanitize-block-erase"
+        erase = ata.security_erase_command("/dev/sdb", enhanced=True)
+        assert "--security-erase-enhanced" in erase
+        assert "p" in erase
+
+
+class FakeAtaRunner(FakeToolRunner):
+    def __init__(self, disk_path: Path, size: int, *, frozen: bool = False, identify: str | None = None):
+        super().__init__()
+        self.disk_path = disk_path
+        self.status_n = 0
+        self.frozen = frozen
+        self.identify = identify or (HDPARM_IDENTIFY_FROZEN if frozen else HDPARM_IDENTIFY)
+        kname = disk_path.name
+        self.lsblk = json.dumps(
+            {
+                "blockdevices": [
+                    {
+                        "name": kname,
+                        "kname": kname,
+                        "type": "disk",
+                        "size": size,
+                        "model": "FakeSATA",
+                        "serial": "S1",
+                        "tran": "sata",
+                        "mountpoints": [None],
+                        "children": [],
+                    }
+                ]
+            }
+        )
+
+    def run(self, argv, timeout=None):
+        self.calls.append(list(argv))
+        prog = argv[0]
+        if prog == "lsblk":
+            return FakeToolRunner.ok(self.lsblk)
+        if prog == "findmnt":
+            return FakeToolRunner.ok("")
+        if prog == "hdparm" and "-I" in argv:
+            return FakeToolRunner.ok(self.identify)
+        if prog == "hdparm" and "--sanitize-block-erase" in argv:
+            self.status_n = 1
+            return FakeToolRunner.ok("sanitize started")
+        if prog == "hdparm" and "--sanitize-crypto-scramble" in argv:
+            self.status_n = 1
+            return FakeToolRunner.ok("sanitize started")
+        if prog == "hdparm" and "--sanitize-status" in argv:
+            self.status_n += 1
+            if self.status_n < 3:
+                return FakeToolRunner.ok("SD2: sanitize operation currently in progress")
+            return FakeToolRunner.ok("SD0: sanitize operation completed successfully")
+        if prog == "hdparm" and "--security-set-pass" in argv:
+            return FakeToolRunner.ok("password set")
+        if prog == "hdparm" and (
+            "--security-erase" in argv or "--security-erase-enhanced" in argv
+        ):
+            return FakeToolRunner.ok("erased")
+        if prog == "hdparm" and "--security-disable" in argv:
+            return FakeToolRunner.ok("disabled")
+        return FakeToolRunner.ok("")
+
+
+class TestAtaOrchestrator:
+    def config(self, tmp_path, passes, **kw):
+        device = tmp_path / "fakedisk"
+        device.write_bytes(b"\xaa" * (writer.BLOCK_SIZE * 2 + 5000))
+        control = tmp_path / "control"
+        control.mkdir(exist_ok=True)
+        cfg = WipeConfig(
+            device=str(device),
+            passes=passes,
+            confirmation_word="DESTROY",
+            confirmation_device=str(device),
+            control_dir=str(control),
+            size_bytes=writer.BLOCK_SIZE * 2 + 5000,
+            dev_dir=str(tmp_path),
+            allow_non_nvme=True,
+            **kw,
+        )
+        return cfg, device, control
+
+    def test_sata_block_erase_issues_hdparm(self, tmp_path, monkeypatch):
+        import chafftafarian.wipe.orchestrator as orch
+
+        monkeypatch.setattr(orch, "SANITIZE_POLL_S", 0)
+        monkeypatch.setattr(orch.time, "sleep", lambda *a, **k: None)
+        cfg, device, _control = self.config(
+            tmp_path, [{"kind": "sanitize", "action": "sata-block-erase"}]
+        )
+        runner = FakeAtaRunner(device, cfg.size_bytes)
+        summary = WipeOrchestrator(cfg, runner, lambda *a, **k: None).run()
+        assert summary.ok, summary.errors
+        starts = [c for c in runner.calls if "--sanitize-block-erase" in c]
+        assert starts, runner.calls
+
+    def test_sata_frozen_refuses_firmware(self, tmp_path, monkeypatch):
+        import chafftafarian.wipe.orchestrator as orch
+
+        monkeypatch.setattr(orch, "SANITIZE_POLL_S", 0)
+        monkeypatch.setattr(orch.time, "sleep", lambda *a, **k: None)
+        cfg, device, _control = self.config(
+            tmp_path, [{"kind": "sanitize", "action": "sata-block-erase"}]
+        )
+        runner = FakeAtaRunner(device, 1, frozen=True)
+        summary = WipeOrchestrator(cfg, runner, lambda *a, **k: None).run()
+        assert not summary.ok
+        assert any("frozen" in e for e in summary.errors)
+
+    def test_security_erase_set_pass_then_erase(self, tmp_path, monkeypatch):
+        import chafftafarian.wipe.orchestrator as orch
+
+        monkeypatch.setattr(orch, "SANITIZE_POLL_S", 0)
+        monkeypatch.setattr(orch.time, "sleep", lambda *a, **k: None)
+        cfg, device, _control = self.config(
+            tmp_path, [{"kind": "sanitize", "action": "sata-secure-erase"}]
+        )
+        runner = FakeAtaRunner(device, 1)
+        summary = WipeOrchestrator(cfg, runner, lambda *a, **k: None).run()
+        assert summary.ok, summary.errors
+        assert any("--security-set-pass" in c for c in runner.calls)
+        assert any("--security-erase-enhanced" in c for c in runner.calls)
+        assert any("--security-disable" in c for c in runner.calls)
 
 
 # -- protocol / worker config ---------------------------------------------------------

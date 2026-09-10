@@ -40,6 +40,8 @@ const TOOLS = {
   pkexec: '/usr/bin/pkexec',
   lsblk: '/usr/bin/lsblk',
   findmnt: '/usr/bin/findmnt',
+  smartctl: '/usr/sbin/smartctl',
+  hdparm: '/usr/sbin/hdparm',
 };
 
 const BOOTSTRAP = {
@@ -53,43 +55,80 @@ const BOOTSTRAP = {
 
 const DEVICES = [
   {
-    kname: '/dev/nvme0n1', name: 'nvme0n1', type: 'disk', transport: 'nvme',
+    kname: 'nvme0n1', path: '/dev/nvme0n1', type: 'disk', transport: 'nvme',
     size_bytes: 2000398934016, model: 'Samsung SSD 990 PRO 2TB',
     serial: 'S6Z1NJ0R123456', is_nvme: true,
     sanitize: { supported: true, block_erase: true, crypto_erase: true, overwrite: false },
-    children: [
+    partitions: [
       { name: 'nvme0n1p1', mountpoints: ['/boot/efi'], fstype: 'vfat', size_bytes: 536866816 },
       { name: 'nvme0n1p2', mountpoints: ['/'], fstype: 'ext4', size_bytes: 1988163260416 },
     ],
     os_disk: true, mounted: true, swap: false,
   },
   {
-    kname: '/dev/nvme1n1', name: 'nvme1n1', type: 'disk', transport: 'nvme',
+    kname: 'nvme1n1', path: '/dev/nvme1n1', type: 'disk', transport: 'nvme',
     size_bytes: 1000204886016, model: 'WD_BLACK SN770 1TB',
     serial: 'WDF0101ABCDEF', is_nvme: true,
-    sanitize: { supported: true, block_erase: true, crypto_erase: false, overwrite: false },
-    children: [
+    sanitize: { supported: true, block_erase: true, crypto_erase: false, overwrite: true },
+    partitions: [
       { name: 'nvme1n1p1', mountpoints: ['/mnt/scratch'], fstype: 'ext4', size_bytes: 1000202039296 },
     ],
     os_disk: false, mounted: true, swap: false,
   },
   {
-    kname: '/dev/sda', name: 'sda', type: 'disk', transport: 'usb',
+    kname: 'sda', path: '/dev/sda', type: 'disk', transport: 'usb',
     size_bytes: 30752073728, model: 'Cruzer Glide 3.0',
     serial: '030112214ABC', is_nvme: false,
-    sanitize: { supported: false, block_erase: false, crypto_erase: false, overwrite: false },
-    children: [],
+    sanitize: null,
+    partitions: [],
     os_disk: false, mounted: false, swap: false,
   },
   {
-    kname: '/dev/loop0', name: 'loop0', type: 'disk', transport: null,
+    kname: 'sdb', path: '/dev/sdb', type: 'disk', transport: 'sata',
+    size_bytes: 500107862016, model: 'Samsung SSD 860 EVO 500GB',
+    serial: 'S3Z1NB0K123456', is_nvme: false,
+    sanitize: null,
+    partitions: [],
+    os_disk: false, mounted: false, swap: false,
+  },
+  {
+    kname: 'loop0', path: '/dev/loop0', type: 'disk', transport: null,
     size_bytes: 1073741824, model: '(loop)', serial: '',
     is_nvme: false,
-    sanitize: { supported: false, block_erase: false, crypto_erase: false, overwrite: false },
-    children: [],
+    sanitize: null,
+    partitions: [],
     os_disk: false, mounted: false, swap: false,
   },
 ];
+
+const SMART = {
+  '/dev/nvme0n1': {
+    smart: { passed: true, temperature_c: 48, power_on_hours: 6122,
+             firmware: '4B2QJXD7', percentage_used: 41, available_spare: 100, media_errors: 0 },
+    smart_error: null,
+    last_sanitize: { state: 'never', media_modified: false, percent: 0 },
+  },
+  '/dev/nvme1n1': {
+    smart: { passed: true, temperature_c: 36, power_on_hours: 1404,
+             firmware: '731030WD', percentage_used: 3, available_spare: 100, media_errors: 0 },
+    smart_error: null,
+    last_sanitize: { state: 'in-progress', media_modified: false, percent: 41 },
+  },
+  '/dev/sda': {
+    smart: null, smart_error: 'permission', last_sanitize: null, ata: null,
+  },
+  '/dev/sdb': {
+    smart: { passed: true, temperature_c: 33, power_on_hours: 8801,
+             firmware: 'RVT04B6Q', percentage_used: null, available_spare: null, media_errors: null },
+    smart_error: null,
+    last_sanitize: null,
+    ata: { frozen: true, sanitize_block: true, sanitize_crypto: true,
+           security_erase: true, security_erase_enhanced: true },
+  },
+  '/dev/loop0': {
+    smart: null, smart_error: 'failed', last_sanitize: null, ata: null,
+  },
+};
 
 const RUNS = [
   {
@@ -120,7 +159,7 @@ const LOGS = [
 const SPEC_DEVICE = [
   { name: 'allow_non_nvme', default: 'false', kind: 'bool', choices: [], group: 'Devices',
     label: 'Allow non-NVMe devices',
-    help: 'Enables sanitize/wipe on SATA, USB and loop devices. NVMe-only is the safe default; loop devices are how the wipe path is tested without spare NVMe hardware.' },
+    help: 'This switch lets wipe run on SATA, USB, and loop devices. Leave it off unless you are testing.' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -158,35 +197,117 @@ export async function deviceList() {
   return clone(devices);
 }
 
-export async function deviceDetail(kname) {
-  const d = devices.find((x) => x.kname === kname);
-  if (!d) return { error: `no device ${kname}` };
-  return clone({ ...d, partitions: d.children });
+export async function deviceDetail(pathOrKname) {
+  const d = devices.find((x) =>
+    x.path === pathOrKname || x.kname === pathOrKname || x.kname === String(pathOrKname).replace(/^\/dev\//, ''));
+  if (!d) return { error: `no device ${pathOrKname}` };
+  const extra = SMART[d.path] || { smart: null, smart_error: 'failed', last_sanitize: null };
+  return clone({ ...d, ...extra });
 }
 
 // -- wipe ----------------------------------------------------------------------
 
+function resolvePlanName(cfg) {
+  if (cfg.plan === 'paranoid' || cfg.plan === 'standard' || cfg.plan === 'quick') return cfg.plan;
+  return cfg.quick ? 'quick' : 'paranoid';
+}
+
+function sanitizeActionFor(dev, requested) {
+  if (!dev.is_nvme) {
+    const ata = (SMART[dev.path] || {}).ata;
+    if (!ata || ata.frozen) return null;
+    if (requested === 'sata-secure-erase' && ata.security_erase) return 'sata-secure-erase';
+    if (requested === 'sata-crypto' && ata.sanitize_crypto) return 'sata-crypto';
+    if (requested === 'sata-block-erase' && ata.sanitize_block) return 'sata-block-erase';
+    if (ata.sanitize_block) return 'sata-block-erase';
+    if (ata.sanitize_crypto) return 'sata-crypto';
+    return null;
+  }
+  const want = (requested === 'crypto-erase' || requested === 'overwrite' || requested === 'block-erase')
+    ? requested : 'block-erase';
+  if (want === 'crypto-erase' && dev.sanitize?.crypto_erase) return 'crypto-erase';
+  if (want === 'overwrite' && dev.sanitize?.overwrite) return 'overwrite';
+  if (want === 'block-erase' && dev.sanitize?.block_erase) return 'block-erase';
+  if (dev.sanitize?.block_erase) return 'block-erase';
+  if (dev.sanitize?.crypto_erase) return 'crypto-erase';
+  if (dev.sanitize?.overwrite) return 'overwrite';
+  return null;
+}
+
+function sanitizeDetail(action, second) {
+  const which = second ? 'a second NVMe Sanitize' : 'NVMe Sanitize';
+  if (action === 'crypto-erase') {
+    return `This pass will run ${which} (crypto erase). The controller destroys its media encryption key.`;
+  }
+  if (action === 'overwrite') {
+    return `This pass will run ${which} (overwrite). The controller overwrites every block with its sanitize pattern.`;
+  }
+  if (action === 'sata-block-erase') {
+    const w = second ? 'a second ATA sanitize' : 'ATA sanitize';
+    return `This pass will run ${w} (block erase) via hdparm. The controller erases every block.`;
+  }
+  if (action === 'sata-crypto') {
+    const w = second ? 'a second ATA sanitize' : 'ATA sanitize';
+    return `This pass will run ${w} (crypto scramble) via hdparm. The controller destroys its media encryption key.`;
+  }
+  if (action === 'sata-secure-erase') {
+    return 'This pass will run ATA security erase via hdparm. This sets a temporary password p, then erases. If it is interrupted, the drive may stay locked.';
+  }
+  return `This pass will run ${which} (block erase). The controller erases every block.`;
+}
+
 export function wipePlan(config) {
   const cfg = typeof config === 'string' ? JSON.parse(config || '{}') : (config || {});
-  const dev = devices.find((x) => x.kname === cfg.device);
+  const dev = devices.find((x) => x.path === cfg.device || x.kname === cfg.device);
   if (!dev) return { error: `no device ${cfg.device}` };
-  const sanitize = !!dev.sanitize.supported;
+  const name = resolvePlanName(cfg);
+  const action = sanitizeActionFor(dev, cfg.sanitize_action);
+  const writeEst = Math.round(dev.size_bytes / 200e6);
   const passes = [];
-  if (sanitize) passes.push({ n: 1, kind: 'sanitize', detail: 'NVMe Sanitize (block erase)', est_s: null });
-  passes.push({ n: passes.length + 1, kind: 'zeros', detail: 'Overwrite with zeros', est_s: Math.round(dev.size_bytes / 200e6) });
-  passes.push({ n: passes.length + 1, kind: 'ones', detail: 'Overwrite with 0xFF', est_s: Math.round(dev.size_bytes / 200e6) });
-  passes.push({ n: passes.length + 1, kind: 'zeros', detail: 'Overwrite with zeros', est_s: Math.round(dev.size_bytes / 200e6) });
-  if (sanitize) passes.push({ n: passes.length + 1, kind: 'sanitize', detail: 'Second NVMe Sanitize', est_s: null });
-  passes.push({ n: passes.length + 1, kind: 'zeros', detail: 'Final zero pass', est_s: Math.round(dev.size_bytes / 200e6) });
-  if (cfg.verify) passes.push({ n: passes.length + 1, kind: 'verify', detail: 'Sampled read-back verification', est_s: 120 });
+  const notes = [];
+  const add = (kind, detail, est_s, act) => {
+    passes.push({ n: passes.length + 1, kind, detail, est_s, action: act || null });
+  };
+  const extra = SMART[dev.path] || {};
+  if (extra.last_sanitize?.state === 'in-progress') {
+    notes.push('A sanitize is already in progress. Starting this wipe will abort it first (sanact=0), then run this plan.');
+  }
+  if (!dev.is_nvme && extra.ata?.frozen) {
+    notes.push('This drive is frozen. Firmware erase is refused. Power-cycle the drive. This app will not suspend the machine to thaw it. Overwrite passes still run.');
+  }
+  if (action) {
+    add('sanitize', sanitizeDetail(action, false), null, action);
+  } else if (dev.is_nvme) {
+    notes.push('This controller reports no sanitize support. Overwrite passes only. Remapped cells may retain data.');
+  } else if (!extra.ata?.frozen) {
+    notes.push('This drive has no firmware erase. Overwrite passes only. Remapped cells may retain data.');
+  }
+  if (name === 'quick') {
+    add('zeros', 'This pass will overwrite the whole disk with zeros.', writeEst);
+  } else if (name === 'standard') {
+    add('zeros', 'This pass will overwrite the whole disk with zeros.', writeEst);
+    add('ones', 'This pass will overwrite the whole disk with 0xFF.', writeEst);
+  } else {
+    add('zeros', 'This pass will overwrite the whole disk with zeros.', writeEst);
+    add('ones', 'This pass will overwrite the whole disk with 0xFF.', writeEst);
+    add('zeros', 'This pass will overwrite the whole disk with zeros again.', writeEst);
+    if (action) add('sanitize', sanitizeDetail(action, true), null, action);
+    add('zeros', 'This pass will overwrite the whole disk with zeros. The drive is left zeroed.', writeEst);
+  }
+  if (cfg.verify) {
+    add('verify', 'This pass will read a sample of blocks and check they match zeros.', 120);
+  }
   const blockers = [];
   if (dev.os_disk) blockers.push('this disk hosts the running operating system');
   if (dev.mounted && !cfg.unmount) blockers.push('mounted partitions present');
   if (dev.swap) blockers.push('swap active on this disk');
-  if (!dev.is_nvme && !cfg.allow_non_nvme) blockers.push('not an NVMe device (enable in settings to override)');
-  return { device: dev.kname, model: dev.model, size_bytes: dev.size_bytes,
-           passes, blockers, sanitize_supported: sanitize,
-           confirmation: { word: 'DESTROY', device: dev.kname } };
+  if (!dev.is_nvme && !BOOTSTRAP.app_settings.allow_non_nvme) {
+    blockers.push('not an NVMe device (enable in settings to override)');
+  }
+  const firmware = dev.is_nvme ? !!dev.sanitize?.supported : !!(extra.ata && extra.ata.firmware_supported !== false && (extra.ata.sanitize_block || extra.ata.sanitize_crypto || extra.ata.security_erase));
+  return { device: dev.path, model: dev.model, size_bytes: dev.size_bytes,
+           passes, notes, blockers, sanitize_supported: firmware,
+           confirmation: { word: 'DESTROY', device: dev.path } };
 }
 
 export async function wipeStart(config) {
@@ -355,6 +476,11 @@ export async function settingsGet() {
 }
 
 export async function settingsSave(values) {
+  const device = (values && values.device) || values || {};
+  if (device.allow_non_nvme != null) {
+    const on = device.allow_non_nvme === true || device.allow_non_nvme === 'true';
+    BOOTSTRAP.app_settings.allow_non_nvme = on;
+  }
   return { ok: true, errors: [] };
 }
 

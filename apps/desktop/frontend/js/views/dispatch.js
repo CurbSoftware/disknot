@@ -26,7 +26,7 @@ export async function render(root) {
   let tailed = null;
 
   root.innerHTML = `
-    ${pageHeader({ exit: '06', title: 'Dispatch', lede: 'Every departure is logged. Tails run live; archives stay on file.',
+    ${pageHeader({ exit: '06', title: 'Dispatch', lede: 'Wipe logs and chaff journals. Open one to read it or tail it live.',
                    coords: 'ARCHIVES · TAILS' })}
     <div class="dispatch-grid" id="dp-grid">
       <div id="dp-list"></div>
@@ -40,7 +40,7 @@ export async function render(root) {
     if (!logs.length) {
       $('#dp-list').innerHTML = emptyState({
         code: '06', headline: 'Nothing on file',
-        guidance: 'WIPE LOGS LAND IN ~/.LOCAL/STATE/CHAFFTAFARIAN · CHAFF JOURNALS LIVE IN EACH RUN',
+        guidance: 'WIPE LOGS LAND IN ~/.LOCAL/STATE/CHAFFTAFARIAN. CHAFF JOURNALS LIVE IN EACH RUN.',
       });
       return;
     }
@@ -104,7 +104,7 @@ export async function render(root) {
   logs = await api.logsList();
   logs = Array.isArray(logs) ? logs : [];
   renderList();
-  renderReader('', '[INFO] Select a log on the left.\n[INFO] Wipe archives land in the state dir; chaff journals live in each run.');
+  renderReader('', '[INFO] Select a log on the left.\n[INFO] Wipe logs are in the state dir. Chaff journals are in each run.');
 
   return () => {
     api.tailStop().catch(() => {});

@@ -211,7 +211,7 @@ def _selftest_wipe_plan() -> int:
     plan (proves the wipe package and chaff-free imports survived freezing
    : PyInstaller's favorite failure). No devices, no root."""
     from .wipe.inventory import DeviceInfo
-    from .wipe.nvme import parse_sanicap, parse_sanitize_log
+    from .wipe.nvme import parse_sanicap, parse_sanitize_log, sanitize_command
     from .wipe.plan import build_plan
 
     dev = DeviceInfo(
@@ -226,12 +226,30 @@ def _selftest_wipe_plan() -> int:
     caps = parse_sanicap(0b001)
     paranoid = build_plan(dev, caps)
     quick = build_plan(dev, caps, quick=True, verify=True)
+    standard = build_plan(dev, caps, plan="standard")
     kinds = [p.kind for p in paranoid.passes]
     if kinds != ["sanitize", "zeros", "ones", "zeros", "sanitize", "zeros"]:
         print(f"SELFTEST FAIL: paranoid passes {kinds}", file=sys.stderr)
         return 1
     if [p.kind for p in quick.passes] != ["sanitize", "zeros", "verify"]:
         print("SELFTEST FAIL: quick passes", file=sys.stderr)
+        return 1
+    if [p.kind for p in standard.passes] != ["sanitize", "zeros", "ones"]:
+        print("SELFTEST FAIL: standard passes", file=sys.stderr)
+        return 1
+    crypto = build_plan(dev, parse_sanicap(0b010), plan="quick", sanitize_action="crypto-erase")
+    if not crypto.passes or crypto.passes[0].action != "crypto-erase":
+        print("SELFTEST FAIL: crypto-erase action", file=sys.stderr)
+        return 1
+    if "--sanact=4" not in sanitize_command("/dev/nvme9n1", "crypto-erase"):
+        print("SELFTEST FAIL: crypto-erase sanact", file=sys.stderr)
+        return 1
+    if "--sanact=3" not in sanitize_command("/dev/nvme9n1", "overwrite"):
+        print("SELFTEST FAIL: overwrite sanact", file=sys.stderr)
+        return 1
+    overwrite = build_plan(dev, parse_sanicap(0b100), plan="quick", sanitize_action="overwrite")
+    if not overwrite.passes or overwrite.passes[0].action != "overwrite":
+        print("SELFTEST FAIL: overwrite action", file=sys.stderr)
         return 1
     log = parse_sanitize_log("sprog : 65535\nsstat : 0x101")
     if log.state != "success" or not log.done:

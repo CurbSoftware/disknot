@@ -612,6 +612,14 @@
   text-transform: uppercase; color: var(--amber);
 }
 .ffield .fhint { font-size: 11px; color: var(--ink-4); line-height: 1.5; }
+.fact {
+  margin: 0.45rem 0 0;
+  color: var(--ink-2);
+  font-size: var(--text-sm, 13px);
+  line-height: 1.45;
+}
+.fact + .fact { margin-top: 0.35rem; }
+.seg button:disabled { opacity: 0.4; cursor: not-allowed; }
 .fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
          gap: 0.9rem 1.2rem; }
 .finput, select.finput, textarea.finput { width: 100%; box-sizing: border-box; }

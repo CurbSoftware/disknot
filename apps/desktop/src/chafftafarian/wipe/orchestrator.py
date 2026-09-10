@@ -16,12 +16,26 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
+from .ata import (
+    ATA_ACTIONS,
+    identify_command,
+    parse_hdparm_identify,
+    parse_sanitize_status,
+    sanitize_block_erase_command,
+    sanitize_crypto_scramble_command,
+    sanitize_status_command,
+    security_disable_command,
+    security_erase_command,
+    security_set_pass_command,
+)
 from .inventory import DeviceInfo, list_devices
 from .nvme import (
+    NVME_ACTIONS,
     SanitizeCaps,
     parse_sanicap_from_id_ctrl,
     parse_sanitize_log,
     result_or_none,
+    sanact_for,
     sanitize_command,
     sanitize_log_command,
 )
@@ -113,10 +127,13 @@ class WipeOrchestrator:
     # -- sanitize ----------------------------------------------------------------
 
     def _sanitize(self, dev: DeviceInfo, pass_: Pass) -> None:
-        start = self.runner.run(sanitize_command(dev.path, "block-erase"), timeout=60)
+        action = pass_.action if pass_.action in NVME_ACTIONS else "block-erase"
+        self._abort_in_progress_if_needed(dev)
+        start = self.runner.run(sanitize_command(dev.path, action), timeout=60)
         if not start.ok:
             raise RuntimeError(f"sanitize failed to start: {start.stderr.strip() or start.rc}")
-        self.emit("log", text="sanitize started (sanact=2 block erase)")
+        sanact = sanact_for(action)
+        self.emit("log", text=f"sanitize started (sanact={sanact} {action})")
         time.sleep(2.0)
         deadline = time.monotonic() + SANITIZE_TIMEOUT_S
         while time.monotonic() < deadline:
@@ -158,6 +175,108 @@ class WipeOrchestrator:
             time.sleep(SANITIZE_POLL_S)
         raise RuntimeError("sanitize exceeded 24h: power-cycle territory; see TROUBLESHOOTING")
 
+    def _abort_in_progress_if_needed(self, dev: DeviceInfo) -> None:
+        log = self.runner.run(sanitize_log_command(dev.path), timeout=30)
+        entry = parse_sanitize_log(log.stdout if log.ok else "")
+        if entry.state != "in-progress":
+            return
+        self.emit("log", text="sanitize already in progress: aborting (sanact=0) before start")
+        abort = self.runner.run(sanitize_command(dev.path, "abort"), timeout=60)
+        if not abort.ok:
+            self.emit(
+                "warning",
+                text=(
+                    "sanitize abort command failed: the controller may "
+                    "finish anyway: " + abort.stderr.strip()
+                ),
+            )
+        self._drain_sanitize(dev)
+
+    def _ata_sanitize(self, dev: DeviceInfo, pass_: Pass) -> None:
+        action = pass_.action if pass_.action in ATA_ACTIONS else "sata-block-erase"
+        ident_raw = result_or_none(self.runner.run(identify_command(dev.path), timeout=15))
+        caps = parse_hdparm_identify(ident_raw or "")
+        if caps.frozen:
+            raise RuntimeError(
+                "this drive is frozen: firmware erase refused; power-cycle it"
+            )
+        if action == "sata-secure-erase":
+            self._ata_secure_erase(dev, caps.security_erase_enhanced)
+            return
+        if action == "sata-crypto":
+            argv = sanitize_crypto_scramble_command(dev.path)
+        else:
+            argv = sanitize_block_erase_command(dev.path)
+        start = self.runner.run(argv, timeout=60)
+        if not start.ok:
+            raise RuntimeError(
+                f"hdparm sanitize failed to start: {start.stderr.strip() or start.rc}"
+            )
+        self.emit("log", text=f"hdparm sanitize started ({action})")
+        time.sleep(2.0)
+        deadline = time.monotonic() + SANITIZE_TIMEOUT_S
+        cancel_seen = False
+        while time.monotonic() < deadline:
+            if self._cancel_requested() and not cancel_seen:
+                cancel_seen = True
+                self.emit(
+                    "warning",
+                    text=(
+                        "ATA sanitize cannot be aborted from the host. "
+                        "Waiting for the controller."
+                    ),
+                )
+            status = self.runner.run(sanitize_status_command(dev.path), timeout=30)
+            entry = parse_sanitize_status(
+                (status.stdout or "") + "\n" + (status.stderr or "")
+            )
+            percent = 100.0 if entry.state == "success" else 0.0
+            self.emit(
+                "sanitize_progress",
+                passno=pass_.n,
+                percent=percent,
+                state=entry.state,
+            )
+            if entry.done:
+                if entry.state != "success":
+                    raise RuntimeError(
+                        f"hdparm sanitize ended ({entry.state}): see the wipe log"
+                    )
+                self.emit("log", text=f"hdparm sanitize done ({action})")
+                if cancel_seen:
+                    raise WipeCancelled("cancelled during ATA sanitize")
+                return
+            time.sleep(SANITIZE_POLL_S)
+        raise RuntimeError("hdparm sanitize exceeded 24h: power-cycle territory")
+
+    def _ata_secure_erase(self, dev: DeviceInfo, enhanced: bool) -> None:
+        setp = self.runner.run(security_set_pass_command(dev.path), timeout=60)
+        if not setp.ok:
+            raise RuntimeError(
+                f"hdparm security-set-pass failed: {setp.stderr.strip() or setp.rc}"
+            )
+        self.emit("log", text="hdparm security password set (p); starting erase")
+        erase = self.runner.run(
+            security_erase_command(dev.path, enhanced=enhanced),
+            timeout=SANITIZE_TIMEOUT_S,
+        )
+        disable = self.runner.run(security_disable_command(dev.path), timeout=60)
+        if not disable.ok:
+            self.emit(
+                "warning",
+                text=(
+                    "hdparm security-disable failed: the drive may stay locked "
+                    "with password p: " + disable.stderr.strip()
+                ),
+            )
+        if not erase.ok:
+            raise RuntimeError(
+                f"hdparm security-erase failed: {erase.stderr.strip() or erase.rc}"
+            )
+        self.emit("log", text="hdparm security-erase done")
+        if self._cancel_requested():
+            raise WipeCancelled("cancelled during security-erase")
+
     def _drain_sanitize(self, dev: DeviceInfo) -> None:
         """After sanact=0, wait until the status word stops saying
         in-progress (bounded: an aborted sanitize can leave firmware
@@ -195,7 +314,13 @@ class WipeOrchestrator:
     def run(self) -> WipeSummary:
         started = time.monotonic()
         passes = [
-            Pass(n=i + 1, kind=p.get("kind", "zeros"), detail=p.get("detail", ""), est_s=None)
+            Pass(
+                n=i + 1,
+                kind=p.get("kind", "zeros"),
+                detail=p.get("detail", ""),
+                est_s=None,
+                action=p.get("action"),
+            )
             for i, p in enumerate(self.cfg.passes)
         ]
         summary = WipeSummary(ok=False, device=self.cfg.device, passes_total=len(passes))
@@ -259,7 +384,10 @@ class WipeOrchestrator:
 
                 self.emit("pass_start", passno=pass_.n, kind=pass_.kind, detail=pass_.detail)
                 if pass_.kind == "sanitize":
-                    self._sanitize(fresh_dev, pass_)
+                    if (pass_.action or "").startswith("sata-"):
+                        self._ata_sanitize(fresh_dev, pass_)
+                    else:
+                        self._sanitize(fresh_dev, pass_)
                 elif pass_.kind in ("zeros", "ones"):
                     stats = write_pattern(
                         fresh_dev.path,

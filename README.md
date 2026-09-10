@@ -18,15 +18,17 @@ executable, run it. Linux only in v1.
 
 Device operations need root; the app asks through pkexec (a system
 password dialog) at the moment an operation starts; the GUI itself never
-runs as root. Requirements: `nvme-cli` for NVMe probing and sanitize
-(`sudo apt install nvme-cli` or the equivalent).
+runs as root. Requirements: `nvme-cli` for NVMe probing and sanitize,
+`smartctl` (smartmontools) for the Inspect panel, `hdparm` for SATA/USB
+firmware erase when non-NVMe devices are enabled
+(`sudo apt install nvme-cli smartmontools hdparm` or the equivalent).
 
 ## The six exits
 
 | Exit | View | What it does |
 |---|---|---|
-| 01 | DRIVES | the drive bay: geometry, mounts, OS-disk flags, sanitize capabilities |
-| 02 | SANITIZE | plan → typed DESTROY + device name → per-pass wipe with live progress and cancel |
+| 01 | DRIVES | the drive bay: identity sentences, partitions, OS-disk flags, Inspect (last sanitize + SMART) |
+| 02 | SANITIZE | plan (paranoid / standard / quick) → typed DESTROY + device name → per-pass wipe |
 | 03 | CHAFF | configure a run, preflight it, generate, watch it fill |
 | 04 | RUNS | every run on record: inspect, verify (full/sampled), cleanup |
 | 05 | SETTINGS | the few persisted knobs (including the non-NVMe device gate) |
@@ -40,8 +42,10 @@ Keyboard: `1`–`6` jump exits, `Esc` backs out of dialogs.
 - Active swap is never wipeable.
 - Mounted drives are refused until unmounted, whether by you or explicitly by
   the worker (logged, and re-checked before every pass).
-- Non-NVMe devices are off by default (a settings switch exists for loop-
-  device testing).
+- Non-NVMe devices are off by default (a settings switch exists for SATA,
+  USB, and loop-device testing). Firmware erase on those disks uses
+  hdparm; frozen drives skip firmware erase and still run overwrite
+  passes.
 - Arming a wipe requires typing DESTROY **and** the device's kernel name.
 - The root worker re-validates everything itself; it never trusts the GUI.
 - Chaff never touches devices and never needs privileges. Filling free

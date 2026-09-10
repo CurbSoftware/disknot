@@ -39,7 +39,9 @@ from .chaff_adapter import ChaffWorker, preflight_sync
 from .tail import FileTail
 from .wipe import inventory, safety
 from .wipe import plan as wipe_plan_mod
-from .wipe.nvme import parse_sanicap_from_id_ctrl, result_or_none
+from .wipe.ata import probe_ata
+from .wipe.nvme import parse_sanicap_from_id_ctrl, parse_sanitize_log, result_or_none
+from .wipe.smart import probe_smart
 from .wipe.tools import SubprocessToolRunner
 from .worker_spawn import WipeWorkerProc
 
@@ -47,7 +49,7 @@ from .worker_spawn import WipeWorkerProc
 VIEWS = ("drives", "sanitize", "chaff", "runs", "settings", "dispatch")
 
 # External tools the app shells out to (directly or via the root worker).
-TOOLS = ("nvme", "pkexec", "lsblk", "findmnt")
+TOOLS = ("nvme", "pkexec", "lsblk", "findmnt", "smartctl", "hdparm")
 
 
 def _dumps(obj: object) -> str:
@@ -305,8 +307,32 @@ class Api(QObject):
     def _device_detail(self, path: str) -> str:
         for dev in self._device_list():
             if dev["path"] == path or dev["kname"] == path.removeprefix("/dev/"):
-                return _dumps(dev)
+                return _dumps(self._enrich_detail(dev))
         return _dumps({"error": f"no device {path}"})
+
+    def _enrich_detail(self, dev: dict) -> dict:
+        """Additive inspect fields. Failures are nulls, not exceptions."""
+        last = None
+        if dev.get("is_nvme"):
+            raw = result_or_none(
+                self._runner.run(["nvme", "sanitize-log", dev["path"]], timeout=15)
+            )
+            if raw:
+                entry = parse_sanitize_log(raw)
+                last = {
+                    "state": entry.state,
+                    "media_modified": entry.media_modified,
+                    "percent": round(entry.percent, 1),
+                }
+        smart, smart_error = probe_smart(self._runner, dev["path"])
+        dev["last_sanitize"] = last
+        dev["smart"] = smart
+        dev["smart_error"] = smart_error
+        dev["ata"] = None
+        if not dev.get("is_nvme"):
+            ata = probe_ata(self._runner, dev["path"])
+            dev["ata"] = ata.as_dict() if ata is not None else None
+        return dev
 
     # ---------------------------------------------------------------- wipe
 
@@ -327,6 +353,7 @@ class Api(QObject):
             "crypto_erase": False,
             "overwrite": False,
         }
+        from .wipe.ata import AtaCaps, probe_ata
         from .wipe.inventory import DeviceInfo, Partition
         from .wipe.nvme import parse_sanicap
 
@@ -347,8 +374,25 @@ class Api(QObject):
         parsed_caps = parse_sanicap(
             (caps["block_erase"] << 0) | (caps["crypto_erase"] << 1) | (caps["overwrite"] << 2)
         )
+        last_state = None
+        if info.is_nvme:
+            raw = result_or_none(
+                self._runner.run(["nvme", "sanitize-log", info.path], timeout=15)
+            )
+            if raw:
+                last_state = parse_sanitize_log(raw).state
+        ata_caps = None
+        if not info.is_nvme:
+            ata_caps = probe_ata(self._runner, info.path) or AtaCaps()
         built = wipe_plan_mod.build_plan(
-            info, parsed_caps, verify=bool(cfg.get("verify")), quick=bool(cfg.get("quick"))
+            info,
+            parsed_caps,
+            verify=bool(cfg.get("verify")),
+            quick=bool(cfg.get("quick")),
+            plan=cfg.get("plan"),
+            sanitize_action=cfg.get("sanitize_action"),
+            ata=ata_caps,
+            last_sanitize_state=last_state,
         )
 
         verdict = safety.check_device(

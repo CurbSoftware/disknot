@@ -1,36 +1,29 @@
 // Chafftafarian: views/drives.js
-// EXIT 01 · DRIVES. The drive bay: what is attached, what it can survive,
-// and what it is doing right now. Payload shapes: BRIDGE.md (deviceList).
+// EXIT 01 · DRIVES. Attached disks, what each one is, inspect on demand.
+// Payload shapes: BRIDGE.md (deviceList, deviceDetail).
 
 import { api } from '../api.js';
 import { state, bus } from '../shell.js';
 import {
   chip, kv, card, btn, pageHeader, emptyState, raw, esc,
 } from '../components/ui.js';
-
-const fmtBytes = (n) => {
-  if (n == null) return '·';
-  let f = Number(n);
-  for (const u of ['B', 'KiB', 'MiB', 'GiB', 'TiB']) {
-    if (f < 1024 || u === 'TiB') return u === 'B' ? `${f}${f % 1 ? '' : ''}${u}` : `${f.toFixed(f >= 100 ? 0 : 1)}${u}`;
-    f /= 1024;
-  }
-  return `${n}B`;
-};
+import * as edu from '../content.js';
 
 export async function render(root) {
   const subs = [];
   let devices = [];
+  let inspecting = null;
 
   root.innerHTML = `
-    ${pageHeader({ exit: '01', title: 'Drives', lede: 'The drive bay. What is attached, what it can survive, and what it is doing right now.',
-                   coords: 'LSBLK · ID-CTRL' })}
+    ${pageHeader({ exit: '01', title: 'Drives', lede: edu.copy.drivesLede,
+                   coords: 'LSBLK · ID-CTRL · SMART' })}
     <div class="status-moment" style="margin-bottom:1rem">
       <span id="dr-chip"></span>
       <span class="grow"></span>
       ${btn({ label: 'Rescan', kind: 'ghost', id: 'dr-refresh', tip: 'Re-run lsblk and capability probes' })}
     </div>
     <div id="dr-list" class="card-grid"></div>
+    <div id="dr-inspect"></div>
   `;
 
   const $ = (sel) => root.querySelector(sel);
@@ -47,8 +40,8 @@ export async function render(root) {
     }
   }
 
-  function sanitizeChips(dev) {
-    if (!dev.is_nvme) return raw(chip('idle', 'NO SANITIZE (NOT NVME)'));
+  function sanitizeChip(dev) {
+    if (!dev.is_nvme) return raw(chip('idle', 'NOT NVME'));
     const s = dev.sanitize;
     if (!s) return raw(chip('warn', 'PROBE FAILED'));
     if (!s.supported) return raw(chip('err', 'SANITIZE UNSUPPORTED'));
@@ -57,7 +50,7 @@ export async function render(root) {
       s.crypto_erase && 'CRYPTO',
       s.overwrite && 'OVERWRITE',
     ].filter(Boolean);
-    return raw(chip('ok', `SANITIZE: ${methods.join(' + ')}`));
+    return raw(chip('ok', methods.join(' + ')));
   }
 
   function renderList() {
@@ -65,37 +58,101 @@ export async function render(root) {
       $('#dr-list').innerHTML = emptyState({
         code: '01',
         headline: 'No disks visible',
-        guidance: 'LSBLK REPORTED NO WHOLE DISKS: ATTACH A DRIVE AND RESCAN, OR CHECK PERMISSIONS',
+        guidance: 'ATTACH A DRIVE AND RESCAN, OR CHECK PERMISSIONS',
       });
       return;
     }
-    $('#dr-list').innerHTML = devices.map((dev) => card({
-      num: dev.kname.replace(/[^0-9a-z]/gi, '').slice(0, 2) || 'DK',
-      title: dev.model || dev.kname,
-      eyebrow: `${dev.path} · ${(dev.transport || 'local').toUpperCase()}`,
-      right: raw(
-        (dev.os_disk ? chip('err', 'OS DISK') : '') +
-        (dev.swap ? chip('err', 'SWAP') : '') +
-        (dev.mounted ? chip('warn', 'MOUNTED') : chip('idle', 'UNMOUNTED'))),
-      children: kv([
-        ['SIZE', raw(`<span class="mono">${fmtBytes(dev.size_bytes)}</span>`)],
-        ['SERIAL', raw(`<span class="mono">${esc(dev.serial || '·')}</span>`)],
-        ['MOUNTS', raw(`<span class="mono">${dev.mountpoints?.length ? esc(dev.mountpoints.join(' · ')) : '·'}</span>`)],
-        ['SANITIZE', sanitizeChips(dev)],
-      ]) + (dev.os_disk
-        ? '<p class="micro" style="color:var(--danger)">THIS DISK HOSTS THE RUNNING OS: THE SANITIZE VIEW WILL ALWAYS REFUSE IT</p>'
-        : `<div style="margin-top:0.8rem">
-             ${btn({ label: 'Sanitize this drive…', kind: 'danger', id: `dr-go-${dev.kname}`,
-                     tip: 'Open the SANITIZE view with this device preselected' })}
-           </div>`),
-    })).join('');
-
-    devices.filter((d) => !d.os_disk).forEach((dev) => {
-      $(`#dr-go-${dev.kname}`)?.addEventListener('click', () => {
-        state.pendingDevice = dev.path;
-        location.hash = '#/sanitize';
+    $('#dr-list').innerHTML = devices.map((dev) => {
+      const parts = (dev.partitions || []).map((p) =>
+        `<p class="fact">${esc(edu.partitionIs(p))}</p>`).join('');
+      const go = dev.os_disk ? '' : `
+        ${btn({ label: 'Sanitize this drive', kind: 'danger', id: `dr-go-${dev.kname}`,
+                tip: 'Open Sanitize with this device selected' })}`;
+      return card({
+        num: (dev.kname || '').replace(/[^0-9a-z]/gi, '').slice(0, 2) || 'DK',
+        title: dev.model || dev.kname,
+        eyebrow: `${dev.path} · ${(dev.transport || 'local').toUpperCase()}`,
+        right: raw(
+          (dev.os_disk ? chip('err', 'OS DISK') : '') +
+          (dev.swap ? chip('err', 'SWAP') : '') +
+          (dev.mounted ? chip('warn', 'MOUNTED') : chip('idle', 'UNMOUNTED'))),
+        children: `
+          <p class="fact">${esc(edu.driveIs(dev))}</p>
+          <p class="fact">${esc(edu.driveRole(dev))}</p>
+          <p class="fact">${esc(edu.sanitizeDoes(dev))}</p>
+          ${parts}
+          ${kv([
+            ['SIZE', raw(`<span class="mono">${edu.fmtBytes(dev.size_bytes)}</span>`)],
+            ['SERIAL', raw(`<span class="mono">${esc(dev.serial || '·')}</span>`)],
+            ['SANITIZE', sanitizeChip(dev)],
+          ])}
+          <div style="margin-top:0.8rem;display:flex;gap:0.6rem;flex-wrap:wrap">
+            ${btn({ label: 'Inspect', id: `dr-in-${dev.kname}`,
+                    tip: 'Read last sanitize status and SMART' })}
+            ${go}
+          </div>`,
       });
+    }).join('');
+
+    devices.forEach((dev) => {
+      $(`#dr-in-${dev.kname}`)?.addEventListener('click', () => inspect(dev));
+      if (!dev.os_disk) {
+        $(`#dr-go-${dev.kname}`)?.addEventListener('click', () => {
+          state.pendingDevice = dev.path;
+          location.hash = '#/sanitize';
+        });
+      }
     });
+  }
+
+  async function inspect(dev) {
+    inspecting = dev.path;
+    $('#dr-inspect').innerHTML = card({
+      num: 'i', title: 'Inspect', eyebrow: dev.path,
+      children: '<p class="dim">Reading sanitize-log and SMART.</p>',
+    });
+    $('#dr-inspect').scrollIntoView({ block: 'nearest' });
+    const out = await api.deviceDetail(dev.path);
+    if (inspecting !== dev.path) return;
+    if (out.error) {
+      $('#dr-inspect').innerHTML = card({
+        num: 'i', title: 'Inspect', eyebrow: 'REFUSED',
+        children: `<p class="fact">${esc(out.error)}</p>`,
+      });
+      $('#dr-inspect').scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    const smartChip = out.smart_error
+      ? chip('warn', 'SMART UNAVAILABLE')
+      : (out.smart?.passed === false ? chip('err', 'SMART FAILED')
+        : (out.smart?.passed ? chip('ok', 'SMART PASSED') : chip('idle', 'SMART')));
+    const sanChip = !out.last_sanitize
+      ? chip('idle', 'NO SANITIZE LOG')
+      : chip(
+        out.last_sanitize.state === 'success' ? 'ok'
+          : (out.last_sanitize.state === 'failed' || out.last_sanitize.state === 'in-progress' ? 'warn' : 'idle'),
+        `LAST: ${(out.last_sanitize.state || 'unknown').toUpperCase()}`,
+      );
+    const parts = (out.partitions || []).map((p) =>
+      `<p class="fact">${esc(edu.partitionIs(p))}</p>`).join('');
+    $('#dr-inspect').innerHTML = card({
+      num: 'i', title: out.model || out.kname,
+      eyebrow: (out.path || '').toUpperCase(),
+      right: raw(sanChip + smartChip),
+      children: `
+        <p class="fact">${esc(edu.driveIs(out))}</p>
+        <p class="fact">${esc(edu.driveRole(out))}</p>
+        <p class="fact">${esc(edu.sanitizeDoes(out))}</p>
+        <p class="fact">${esc(edu.lastSanitizeIs(out.last_sanitize))}</p>
+        <p class="fact">${esc(edu.smartIs(out.smart, out.smart_error))}</p>
+        ${parts}
+        ${kv([
+          ['SERIAL', raw(`<span class="mono">${esc(out.serial || '·')}</span>`)],
+          ['FIRMWARE', raw(`<span class="mono">${esc(out.smart?.firmware || '·')}</span>`)],
+          ['TRANSPORT', raw(`<span class="mono">${esc(out.transport || '·')}</span>`)],
+        ])}`,
+    });
+    $('#dr-inspect').scrollIntoView({ block: 'nearest' });
   }
 
   async function refresh() {
