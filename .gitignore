@@ -25,3 +25,6 @@ __pycache__/
 /Chaff_Run_*/
 chaff-run-*/
 *.chaff-manifest.json
+
+# Local third-party source trees used as reference material
+/references/
