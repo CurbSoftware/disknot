@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Package Chafftafarian locally: build the AppImage end to end and
+# Package Disknot locally: build the AppImage end to end and
 # smoke-test it (selftest + list-views + offscreen drives screenshot).
 # Produces packaging/chafftafarian-x86_64.AppImage. Requires
 # apps/desktop/.venv (cd apps/desktop && uv sync --extra dev).

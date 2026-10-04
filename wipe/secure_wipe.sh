@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# NVMe Secure Wipe Script
+# Disknot wipe script
 # Version: 2.1.0
 #
 # WARNING: This script will PERMANENTLY DESTROY all data on the specified drive!

@@ -127,8 +127,8 @@ assemble_appdir() {
   cat > "$APPDIR/$APP_NAME.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Chafftafarian
-Comment=Chaff generation, NVMe tools, and drive sanitization
+Name=Disknot
+Comment=Chaff generator and drive wipe
 Exec=$APP_NAME
 Icon=$APP_NAME
 Categories=System;Filesystem;Utility;

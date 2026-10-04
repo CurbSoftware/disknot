@@ -1,8 +1,8 @@
-# Chafftafarian
+# Disknot
 
 Chaff generation, NVMe tools, and drive sanitization in one desktop app.
 
-Chafftafarian fills wiped or fresh storage with realistic synthetic files
+Disknot fills wiped or fresh storage with realistic synthetic files
 (documents, mail, spreadsheets, payload blobs) that are deterministic,
 verifiable, and confined to their own run directories. It also
 sanitizes NVMe drives properly: the controller Sanitize command bracketing overwrite
@@ -13,7 +13,7 @@ The lineage is the point: wipe the drive, then fill it with chaff.
 
 ## Install
 
-Download `chafftafarian-x86_64.AppImage` from Releases, make it
+Download the AppImage (`chafftafarian-x86_64.AppImage`) from Releases, make it
 executable, run it. Linux only in v1.
 
 Device operations need root; the app asks through pkexec (a system

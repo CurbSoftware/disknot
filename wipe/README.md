@@ -1,4 +1,6 @@
-# NVMe Secure Wipe & Sanitize Guide
+# Disknot
+
+Drive wipe and sanitizer for NVMe drives.
 
 A simple, no-fluff Linux script for securely wiping NVMe drives and restoring them to a factory-like state. This document serves as both a user manual for the script and a general guide to NVMe data destruction.
 

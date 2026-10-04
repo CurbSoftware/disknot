@@ -5,9 +5,9 @@ build-backend = "hatchling.build"
 [project]
 name = "chafftafarian"
 version = "0.1.0"
-description = "Chaff generation, NVMe tools, and drive sanitization in one Control Room-style desktop app"
+description = "Disknot. Chaff generator and drive wipe in one desktop app."
 requires-python = ">=3.12"
-authors = [{ name = "Chafftafarian contributors" }]
+authors = [{ name = "CurbSoftware" }]
 dependencies = [
     "PySide6>=6.7,<7",
     "typer>=0.12",
