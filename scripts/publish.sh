@@ -24,12 +24,22 @@ PY
 tag="v${version}"
 
 ( cd generator/apps/desktop && uv sync --extra dev )
+# appimagetool otherwise names the file from the desktop entry and writes
+# it into whatever directory it considers current. package.sh looks for
+# this exact path.
+export LDAI_OUTPUT="$ROOT/generator/packaging/chafftafarian-x86_64.AppImage"
+set +e
 ( cd generator && ./package.sh )
+pkg_status=$?
+set -e
 
-appimage="generator/packaging/chafftafarian-x86_64.AppImage"
+appimage="$LDAI_OUTPUT"
 if [[ ! -f "$appimage" ]]; then
-  echo "AppImage was not produced" >&2
+  echo "AppImage was not produced (package.sh exit ${pkg_status})" >&2
   exit 1
+fi
+if [[ "$pkg_status" -ne 0 ]]; then
+  echo "package.sh exited ${pkg_status}. Publishing the AppImage it produced." >&2
 fi
 if [[ ! -f wipe/secure_wipe.sh ]]; then
   echo "wipe script is missing" >&2
