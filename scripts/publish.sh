@@ -24,16 +24,12 @@ PY
 tag="v${version}"
 
 ( cd generator/apps/desktop && uv sync --extra dev )
-# appimagetool otherwise names the file from the desktop entry and writes
-# it into whatever directory it considers current. package.sh looks for
-# this exact path.
-export LDAI_OUTPUT="$ROOT/generator/packaging/chafftafarian-x86_64.AppImage"
 set +e
 ( cd generator && ./package.sh )
 pkg_status=$?
 set -e
 
-appimage="$LDAI_OUTPUT"
+appimage="generator/packaging/disknot-x86_64.AppImage"
 if [[ ! -f "$appimage" ]]; then
   echo "AppImage was not produced (package.sh exit ${pkg_status})" >&2
   exit 1
@@ -47,13 +43,14 @@ if [[ ! -f wipe/secure_wipe.sh ]]; then
 fi
 
 mkdir -p "$DEST"
-find "$DEST" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-cp -a "$appimage" "$DEST/chafftafarian-x86_64.AppImage"
+# Leave <tag>/ directories in place. Replace only the current files.
+find "$DEST" -mindepth 1 -maxdepth 1 -type f -exec rm -f {} +
+cp -a "$appimage" "$DEST/disknot-x86_64.AppImage"
 cp -a wipe/secure_wipe.sh "$DEST/secure_wipe.sh"
-chmod +x "$DEST/chafftafarian-x86_64.AppImage" "$DEST/secure_wipe.sh"
+chmod +x "$DEST/disknot-x86_64.AppImage" "$DEST/secure_wipe.sh"
 
 artifacts=(
-  "$DEST/chafftafarian-x86_64.AppImage"
+  "$DEST/disknot-x86_64.AppImage"
   "$DEST/secure_wipe.sh"
 )
 
@@ -81,6 +78,9 @@ if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
       echo "release $tag already has $name"
     fi
   done
+  if printf '%s\n' "${existing[@]+"${existing[@]}"}" | grep -qx 'chafftafarian-x86_64.AppImage'; then
+    gh release delete-asset "$tag" chafftafarian-x86_64.AppImage --repo "$GH_REPO" --yes
+  fi
 else
   gh release create "$tag" "${artifacts[@]}" \
     --repo "$GH_REPO" \

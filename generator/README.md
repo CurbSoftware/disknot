@@ -13,7 +13,7 @@ The lineage is the point: wipe the drive, then fill it with chaff.
 
 ## Install
 
-Download the AppImage (`chafftafarian-x86_64.AppImage`) from Releases, make it
+Download the AppImage (`disknot-x86_64.AppImage`) from Releases, make it
 executable, run it. Linux only in v1.
 
 Device operations need root; the app asks through pkexec (a system

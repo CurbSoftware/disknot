@@ -19,6 +19,7 @@ REPO="$(cd "$PKG_DIR/.." && pwd)"
 DESKTOP_APP="$REPO/apps/desktop"
 VENV_PY="$DESKTOP_APP/.venv/bin/python"
 APP_NAME="chafftafarian"
+APPIMAGE_FILE="disknot-x86_64.AppImage"
 DIST="$DESKTOP_APP/dist/$APP_NAME"
 APPDIR="$PKG_DIR/$APP_NAME.AppDir"
 CACHE="$PKG_DIR/cache"
@@ -179,22 +180,28 @@ TODO
   # no linuxdeploy --plugin qt: it targets system-Qt builds; PyInstaller
   # already bundles all of Qt here (verified by Control Room's history).
 
+  # The desktop entry Name is Disknot, so appimagetool would otherwise
+  # write Disknot-x86_64.AppImage. Force the published filename.
+  export LDAI_OUTPUT="$PKG_DIR/$APPIMAGE_FILE"
+
   log "running linuxdeploy"
   deploy --output appimage || die "linuxdeploy failed"
   grep -q QTWEBENGINE_DISABLE_SANDBOX "$APPDIR/AppRun" \
     || die "linuxdeploy replaced our AppRun: check the built image"
 
-  local produced appimage="$PKG_DIR/$APP_NAME-x86_64.AppImage"
-  produced="$(find "$PKG_DIR" -maxdepth 1 -name '*-x86_64.AppImage' -print -quit)"
-  [[ -n "$produced" ]] || die "linuxdeploy reported success but produced no AppImage"
-  [[ "$produced" == "$appimage" ]] || mv "$produced" "$appimage"
+  local produced appimage="$PKG_DIR/$APPIMAGE_FILE"
+  if [[ ! -f "$appimage" ]]; then
+    produced="$(find "$PKG_DIR" -maxdepth 1 -name '*-x86_64.AppImage' -print -quit)"
+    [[ -n "$produced" ]] || die "linuxdeploy reported success but produced no AppImage"
+    mv "$produced" "$appimage"
+  fi
   printf 'AppImage: %s  (%s)\n' "$appimage" "$(du -h "$appimage" | cut -f1)"
 }
 
 # --- post-build smoke -------------------------------------------------------------
 
 smoke() {
-  local appimage="$PKG_DIR/$APP_NAME-x86_64.AppImage"
+  local appimage="$PKG_DIR/$APPIMAGE_FILE"
   [[ -f "$appimage" ]] || { echo "SMOKE: skipped (no AppImage)" >&2; return 0; }
   log "smoke: --selftest-wipe-plan"
   "$appimage" --appimage-extract-and-run --selftest-wipe-plan \
