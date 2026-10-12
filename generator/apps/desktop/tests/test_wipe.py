@@ -293,6 +293,13 @@ class TestInventory:
     def test_lsblk_failure_yields_empty(self):
         runner = FakeToolRunner(FakeToolRunner.err("lsblk: boom"))
         assert inventory.list_devices(runner) == []
+        scan = inventory.scan_devices(FakeToolRunner(FakeToolRunner.err("lsblk: boom")))
+        assert scan.devices == []
+        assert "boom" in (scan.error or "")
+
+    def test_lsblk_columns_are_real_fields(self):
+        assert "CHILDREN" not in inventory._LSBLK_ARGS
+        assert "MOUNTPOINTS" in ",".join(inventory._LSBLK_ARGS)
 
     def test_enrich_with_nvme(self):
         runner = FakeToolRunner(

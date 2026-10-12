@@ -13,7 +13,9 @@ surface both of those talk to.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import threading
 import traceback
 from collections.abc import Callable
@@ -43,7 +45,7 @@ from .wipe.ata import probe_ata
 from .wipe.nvme import parse_sanicap_from_id_ctrl, parse_sanitize_log, result_or_none
 from .wipe.smart import probe_smart
 from .wipe.tools import SubprocessToolRunner
-from .worker_spawn import WipeWorkerProc
+from .worker_spawn import WipeWorkerProc, gui_pkexec_argv
 
 # The screenshot-harness views; the frontend routes #/<view> to these.
 VIEWS = ("drives", "sanitize", "chaff", "runs", "settings", "dispatch")
@@ -150,6 +152,7 @@ class Api(QObject):
             "tools": self._tools(),
             "busy": self._busy(),
             "kind": self._kind(),
+            "root": os.geteuid() == 0,
             "app_settings": {
                 "allow_non_nvme": bool(self._app_settings.get("allow_non_nvme", False)),
                 "default_target": self._app_settings.get("default_target", ""),
@@ -245,10 +248,8 @@ class Api(QObject):
 
     # ------------------------------------------------------------- devices
 
-    def _device_list(self) -> list[dict]:
-        """Inventory + safety marks + sanitize caps, as the DRIVES view
-        renders them. Never raises: a failed probe degrades to unknown."""
-        devices = inventory.enrich_with_nvme(inventory.list_devices(self._runner), self._runner)
+    def _device_dicts(self, devices) -> list[dict]:
+        """Safety marks and sanitize caps, as the DRIVES view renders them."""
         try:
             os_knames = safety.os_disk_knames(self._runner)
         except Exception:
@@ -293,12 +294,52 @@ class Api(QObject):
             )
         return out
 
+    def _device_list(self) -> list[dict]:
+        """Inventory + safety marks + sanitize caps. A failed probe degrades
+        to an empty list; deviceList carries the lsblk error separately."""
+        devices = inventory.enrich_with_nvme(inventory.list_devices(self._runner), self._runner)
+        return self._device_dicts(devices)
+
     @Slot(result=str)
     def deviceList(self) -> str:
-        return self._guard(self._device_list_json, fallback="[]")
+        return self._guard(
+            self._device_list_json,
+            fallback='{"devices": [], "error": "disk scan failed"}',
+        )
 
     def _device_list_json(self) -> str:
-        return _dumps(self._device_list())
+        scan = inventory.scan_devices(self._runner)
+        if scan.error:
+            return _dumps({"devices": [], "error": scan.error})
+        devices = inventory.enrich_with_nvme(scan.devices, self._runner)
+        return _dumps({"devices": self._device_dicts(devices), "error": None})
+
+    @Slot(result=str)
+    def relaunchAsRoot(self) -> str:
+        return self._guard(self._relaunch_as_root)
+
+    def _relaunch_as_root(self) -> str:
+        """Polkit password prompt, then this app again as root."""
+        if os.geteuid() == 0:
+            return _dumps({"ok": True, "error": None, "already_root": True})
+        try:
+            proc = subprocess.Popen(gui_pkexec_argv(), start_new_session=True)
+        except OSError as exc:
+            return _dumps({"ok": False, "error": str(exc)})
+        try:
+            rc = proc.wait(timeout=0.6)
+        except subprocess.TimeoutExpired:
+            from PySide6.QtCore import QTimer
+            from PySide6.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app is not None:
+                QTimer.singleShot(0, app.quit)
+            return _dumps({"ok": True, "error": None})
+        return _dumps({
+            "ok": False,
+            "error": f"Password prompt was cancelled (exit {rc}).",
+        })
 
     @Slot(str, result=str)
     def deviceDetail(self, path: str) -> str:

@@ -246,6 +246,16 @@ export async function render(root) {
   }
 
   async function doStart() {
+    if (!state.root) {
+      $('#sn-run-section').hidden = false;
+      stream.clear();
+      stream.append('[INFO] Wipe and sanitize need root. Waiting for the password prompt.');
+      const priv = await api.relaunchAsRoot();
+      if (!priv?.ok) {
+        stream.append(`[ERROR] ${priv?.error || 'Could not start the password prompt.'}`);
+      }
+      return;
+    }
     form.confirm_word = $('#sn-confirm-word').value.trim().toUpperCase();
     form.confirm_device = $('#sn-confirm-device').value.trim();
     const ack = await api.wipeStart({
@@ -321,8 +331,16 @@ export async function render(root) {
     });
   }));
 
-  devices = await api.deviceList();
-  devices = Array.isArray(devices) ? devices : [];
+  const listed = await api.deviceList();
+  devices = Array.isArray(listed) ? listed : (listed && Array.isArray(listed.devices) ? listed.devices : []);
+  if (listed && listed.error && !devices.length) {
+    root.innerHTML = pageHeader({ exit: '02', title: 'Sanitize', lede: edu.copy.sanitizeLede }) +
+      emptyState({
+        code: '02', headline: 'Could not list disks',
+        guidance: String(listed.error),
+      });
+    return () => subs.forEach((off) => off());
+  }
   if (!devices.length) {
     root.innerHTML = pageHeader({ exit: '02', title: 'Sanitize', lede: edu.copy.sanitizeLede }) +
       emptyState({

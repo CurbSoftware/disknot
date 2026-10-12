@@ -40,6 +40,7 @@ export const state = {
   targetFreeGb: null,  // free space on the default chaff target
   toolsMissing: [],
   bootstrap: null,
+  root: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -110,6 +111,40 @@ function applyBootstrap(b) {
     .filter(([, p]) => !p).map(([n]) => n);
   const disk = b.disk && b.disk.target;
   if (disk && typeof disk.free_gb === 'number') state.targetFreeGb = disk.free_gb;
+  state.root = !!b.root;
+}
+
+function renderPrivilege(api) {
+  const el = document.getElementById('priv-banner');
+  if (!el) return;
+  if (state.root) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML =
+    '<p>Wipe and sanitize need root. Disk listing still runs.</p>' +
+    '<button type="button" class="btn ghost" id="priv-restart">Restart with privileges</button>' +
+    '<p class="priv-err" id="priv-err" hidden></p>';
+  const button = document.getElementById('priv-restart');
+  button?.addEventListener('click', async () => {
+    const errEl = document.getElementById('priv-err');
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = '';
+    }
+    let ack;
+    try {
+      ack = await api.relaunchAsRoot();
+    } catch (err) {
+      ack = { ok: false, error: String(err?.message || err) };
+    }
+    if (!ack?.ok && errEl) {
+      errEl.hidden = false;
+      errEl.textContent = ack?.error || 'Could not start the password prompt.';
+    }
+  });
 }
 
 function renderStatusbar() {
@@ -166,6 +201,7 @@ export async function initShell(api) {
     console.error('bootstrap failed', err);
     state.coreReady = false;
   }
+  renderPrivilege(api);
   renderStatusbar();
   bus.emit('state', { ...state });
 }

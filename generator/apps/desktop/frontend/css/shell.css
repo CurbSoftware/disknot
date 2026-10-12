@@ -118,10 +118,24 @@
 
 #main-col {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
 }
+
+#priv-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-raise);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+#priv-banner[hidden] { display: none; }
+#priv-banner p { margin: 0; }
+#priv-banner .priv-err { color: var(--danger); width: 100%; }
 
 #view {
   overflow-y: auto;

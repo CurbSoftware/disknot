@@ -58,11 +58,14 @@ class DeviceInfo:
         return out
 
 
+# CHILDREN is not an lsblk column. The JSON tree already includes
+# "children" for partitions. Asking for the column makes lsblk exit 1
+# and the drive list stays empty.
 _LSBLK_ARGS = [
     "lsblk",
     "-Jb",
     "-o",
-    "NAME,SIZE,TYPE,KNAME,MODEL,SERIAL,TRAN,MOUNTPOINTS,FSTYPE,CHILDREN",
+    "NAME,SIZE,TYPE,KNAME,MODEL,SERIAL,TRAN,MOUNTPOINTS,FSTYPE",
 ]
 
 
@@ -118,23 +121,38 @@ def _parse_device(node: dict) -> DeviceInfo | None:
     return dev
 
 
-def list_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> list[DeviceInfo]:
-    """All whole disks lsblk reports. Never raises; an lsblk failure yields
-    []. zram devices (RAM-backed swap) are excluded: wiping RAM disks is
-    meaningless and only clutters the drive bay. `dev_dir` rewrites the
-    /dev prefix: tests point it at a temp dir whose "devices" are files."""
+@dataclass
+class DeviceScan:
+    """Whole disks from one lsblk call, plus the reason the list is empty."""
+
+    devices: list[DeviceInfo]
+    error: str | None = None
+
+
+def scan_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> DeviceScan:
+    """All whole disks lsblk reports.
+
+    Never raises. An lsblk failure or a parse error is `error`, with an
+    empty device list. zram devices (RAM-backed swap) are excluded: wiping
+    RAM disks is meaningless and only clutters the drive bay. `dev_dir`
+    rewrites the /dev prefix: tests point it at a temp dir whose "devices"
+    are files.
+    """
     import json
 
     result = runner.run(_LSBLK_ARGS, timeout=15)
     if not result.ok:
-        return []
+        detail = (result.stderr or result.stdout or "").strip()
+        if not detail:
+            detail = f"lsblk exited {result.rc}"
+        return DeviceScan([], detail)
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(result.stdout or "")
     except ValueError:
-        return []
+        return DeviceScan([], "lsblk did not return JSON.")
     nodes = data.get("blockdevices") if isinstance(data, dict) else None
     if not isinstance(nodes, list):
-        return []
+        return DeviceScan([], "lsblk JSON had no blockdevices list.")
     devices: list[DeviceInfo] = []
     for node in nodes:
         dev = _parse_device(node)
@@ -142,7 +160,14 @@ def list_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> list[DeviceInf
             continue
         dev.path = f"{dev_dir}/{dev.kname}"
         devices.append(dev)
-    return devices
+    if not devices:
+        return DeviceScan([], "lsblk reported no whole disks.")
+    return DeviceScan(devices, None)
+
+
+def list_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> list[DeviceInfo]:
+    """Whole disks only. Callers that need the lsblk error use scan_devices."""
+    return scan_devices(runner, dev_dir=dev_dir).devices
 
 
 def enrich_with_nvme(devices: list[DeviceInfo], runner: ToolRunner) -> list[DeviceInfo]:

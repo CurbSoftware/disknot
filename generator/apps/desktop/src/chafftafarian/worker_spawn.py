@@ -28,6 +28,25 @@ from PySide6.QtCore import QObject, Signal
 from .wipe.protocol import read_events
 
 
+def gui_pkexec_argv() -> list[str]:
+    """Restart this app as root so polkit can ask for the password.
+
+    Inside an AppImage, re-exec the image itself. The FUSE mount belongs
+    to the user who opened it, and a root process cannot see that mount.
+    """
+    exe = sys.executable
+    frozen = bool(getattr(sys, "frozen", False))
+    prefix = ["pkexec", "env"]
+    appimage = os.environ.get("APPIMAGE")
+    if appimage:
+        prefix.append("APPIMAGE_EXTRACT_AND_RUN=1")
+        return [*prefix, appimage]
+    if frozen:
+        return [*prefix, exe]
+    src = Path(__file__).resolve().parents[1]
+    return [*prefix, f"PYTHONPATH={src}", exe, "-m", "chafftafarian"]
+
+
 def worker_argv(config_path: Path) -> list[str]:
     """The pkexec command line that re-executes this app as the wipe worker."""
     exe = sys.executable

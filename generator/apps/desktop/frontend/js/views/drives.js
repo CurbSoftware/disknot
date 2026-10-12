@@ -12,6 +12,7 @@ import * as edu from '../content.js';
 export async function render(root) {
   const subs = [];
   let devices = [];
+  let scanError = null;
   let inspecting = null;
 
   root.innerHTML = `
@@ -20,7 +21,7 @@ export async function render(root) {
     <div class="status-moment" style="margin-bottom:1rem">
       <span id="dr-chip"></span>
       <span class="grow"></span>
-      ${btn({ label: 'Rescan', kind: 'ghost', id: 'dr-refresh', tip: 'Re-run lsblk and capability probes' })}
+      ${btn({ label: 'Detect disks', kind: 'ghost', id: 'dr-refresh', tip: 'Scan block devices with lsblk' })}
     </div>
     <div id="dr-list" class="card-grid"></div>
     <div id="dr-inspect"></div>
@@ -54,15 +55,18 @@ export async function render(root) {
   }
 
   function renderList() {
+    const problem = scanError
+      ? `<p class="fact" id="dr-error" style="color:var(--danger);margin-bottom:0.8rem">${esc(scanError)}</p>`
+      : '';
     if (!devices.length) {
-      $('#dr-list').innerHTML = emptyState({
+      $('#dr-list').innerHTML = problem + emptyState({
         code: '01',
-        headline: 'No disks visible',
-        guidance: 'ATTACH A DRIVE AND RESCAN, OR CHECK PERMISSIONS',
+        headline: scanError ? 'Could not list disks' : 'No disks visible',
+        guidance: scanError || 'ATTACH A DRIVE AND DETECT DISKS AGAIN',
       });
       return;
     }
-    $('#dr-list').innerHTML = devices.map((dev) => {
+    $('#dr-list').innerHTML = problem + devices.map((dev) => {
       const parts = (dev.partitions || []).map((p) =>
         `<p class="fact">${esc(edu.partitionIs(p))}</p>`).join('');
       const go = dev.os_disk ? '' : `
@@ -155,13 +159,32 @@ export async function render(root) {
     $('#dr-inspect').scrollIntoView({ block: 'nearest' });
   }
 
+  function unpackScan(raw) {
+    if (Array.isArray(raw)) return { devices: raw, error: raw.length ? null : 'Disk scan returned nothing.' };
+    if (raw && Array.isArray(raw.devices)) {
+      return {
+        devices: raw.devices,
+        error: raw.error || (raw.devices.length ? null : 'Disk scan returned nothing.'),
+      };
+    }
+    if (raw && raw.error) return { devices: [], error: String(raw.error) };
+    return { devices: [], error: 'Disk scan returned nothing.' };
+  }
+
   async function refresh() {
-    $('#dr-refresh').setAttribute('aria-disabled', 'true');
-    devices = await api.deviceList();
-    devices = Array.isArray(devices) ? devices : [];
+    const button = $('#dr-refresh');
+    if (button) button.setAttribute('aria-disabled', 'true');
+    try {
+      const packed = unpackScan(await api.deviceList());
+      devices = packed.devices;
+      scanError = packed.error;
+    } catch (err) {
+      devices = [];
+      scanError = String(err?.message || err);
+    }
     renderChip();
     renderList();
-    $('#dr-refresh').setAttribute('aria-disabled', 'false');
+    if (button) button.setAttribute('aria-disabled', 'false');
   }
 
   $('#dr-refresh').addEventListener('click', refresh);

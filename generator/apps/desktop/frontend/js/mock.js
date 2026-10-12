@@ -49,6 +49,7 @@ const BOOTSTRAP = {
   tools: { ...TOOLS },
   busy: false,
   kind: null,
+  root: false,
   app_settings: { allow_non_nvme: false, default_target: '/srv/chaff' },
   disk: { target: { free_gb: 33.1, used_gb: 48.9, total_gb: 82, tree_bytes: 402653184 } },
 };
@@ -194,7 +195,11 @@ export async function getBootstrap() {
 // -- devices -----------------------------------------------------------------
 
 export async function deviceList() {
-  return clone(devices);
+  return { devices: clone(devices), error: null };
+}
+
+export async function relaunchAsRoot() {
+  return { ok: false, error: 'Password prompt is not available in the browser preview.' };
 }
 
 export async function deviceDetail(pathOrKname) {

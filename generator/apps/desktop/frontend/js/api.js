@@ -21,7 +21,7 @@ export const isMock = MOCK;
 
 // The frozen bridge contract: every slot the core exposes.
 const SLOTS = [
-  'getBootstrap', 'deviceList', 'deviceDetail', 'wipePlan', 'wipeStart',
+  'getBootstrap', 'deviceList', 'deviceDetail', 'relaunchAsRoot', 'wipePlan', 'wipeStart',
   'wipeAbort', 'chaffPreflight', 'chaffStart', 'chaffCancel', 'chaffPause',
   'chaffResume', 'runsList', 'runInspect', 'verifyStart', 'runCleanup',
   'logsList', 'logRead', 'tailStart', 'tailStop', 'settingsGet',
