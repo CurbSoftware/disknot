@@ -29,7 +29,7 @@ set +e
 pkg_status=$?
 set -e
 
-appimage="generator/packaging/disknot-x86_64.AppImage"
+appimage="generator/packaging/disknot-${version}-x86_64.AppImage"
 if [[ ! -f "$appimage" ]]; then
   echo "AppImage was not produced (package.sh exit ${pkg_status})" >&2
   exit 1
@@ -45,12 +45,12 @@ fi
 mkdir -p "$DEST"
 # Leave <tag>/ directories in place. Replace only the current files.
 find "$DEST" -mindepth 1 -maxdepth 1 -type f -exec rm -f {} +
-cp -a "$appimage" "$DEST/disknot-x86_64.AppImage"
+cp -a "$appimage" "$DEST/disknot-${version}-x86_64.AppImage"
 cp -a wipe/secure_wipe.sh "$DEST/secure_wipe.sh"
-chmod +x "$DEST/disknot-x86_64.AppImage" "$DEST/secure_wipe.sh"
+chmod +x "$DEST/disknot-${version}-x86_64.AppImage" "$DEST/secure_wipe.sh"
 
 artifacts=(
-  "$DEST/disknot-x86_64.AppImage"
+  "$DEST/disknot-${version}-x86_64.AppImage"
   "$DEST/secure_wipe.sh"
 )
 

@@ -40,9 +40,9 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --generate-notes || true
           gh release upload "$GITHUB_REF_NAME" \
-            packaging/disknot-x86_64.AppImage --clobber
+            packaging/disknot-*-x86_64.AppImage --clobber
       - uses: actions/upload-artifact@v4
         with:
           name: disknot-x86_64.AppImage
-          path: packaging/disknot-x86_64.AppImage
+          path: packaging/disknot-*-x86_64.AppImage
           if-no-files-found: error

@@ -19,7 +19,8 @@ REPO="$(cd "$PKG_DIR/.." && pwd)"
 DESKTOP_APP="$REPO/apps/desktop"
 VENV_PY="$DESKTOP_APP/.venv/bin/python"
 APP_NAME="chafftafarian"
-APPIMAGE_FILE="disknot-x86_64.AppImage"
+APP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$DESKTOP_APP/pyproject.toml" | head -n1)"
+APPIMAGE_FILE="disknot-${APP_VERSION}-x86_64.AppImage"
 DIST="$DESKTOP_APP/dist/$APP_NAME"
 APPDIR="$PKG_DIR/$APP_NAME.AppDir"
 CACHE="$PKG_DIR/cache"
@@ -30,6 +31,7 @@ log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
 
 [[ -x "$VENV_PY" ]] || die "no venv python at $VENV_PY: run: cd apps/desktop && uv sync --extra dev"
+[[ -n "$APP_VERSION" ]] || die "no version in $DESKTOP_APP/pyproject.toml"
 [[ -d "$DESKTOP_APP/src/chaff_generator" ]] || die "vendored chaff core missing"
 
 # --- icon: SVG -> PNG via the venv's QtSvg -----------------------------------
