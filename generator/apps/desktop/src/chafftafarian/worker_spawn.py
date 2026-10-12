@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -28,23 +29,92 @@ from PySide6.QtCore import QObject, Signal
 from .wipe.protocol import read_events
 
 
-def gui_pkexec_argv() -> list[str]:
-    """Restart this app as root so polkit can ask for the password.
+def _outside_mount(path: Path) -> bool:
+    text = str(path)
+    return "/.mount_" not in text and not text.startswith("/tmp/.mount")
 
-    Inside an AppImage, re-exec the image itself. The FUSE mount belongs
-    to the user who opened it, and a root process cannot see that mount.
+
+def real_appimage_path(env: dict | None = None, argv0: str | None = None) -> str | None:
+    """The AppImage file on a normal filesystem, not the FUSE mount."""
+    env = os.environ if env is None else env
+    candidates: list[str] = []
+    for key in ("APPIMAGE", "ARGV0"):
+        value = env.get(key)
+        if value:
+            candidates.append(value)
+    if argv0:
+        candidates.append(argv0)
+    owd = env.get("OWD") or env.get("PWD") or os.getcwd()
+    for raw in candidates:
+        if not raw or raw.startswith("-"):
+            continue
+        path = Path(raw)
+        if not path.is_absolute():
+            path = Path(owd) / path
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if not _outside_mount(path) or not path.is_file():
+            continue
+        return str(path)
+    return None
+
+
+def relaunch_argv(env: dict | None = None, argv0: str | None = None) -> list[str]:
+    """pkexec command that prompts, then starts this app as root.
+
+    The elevated AppImage is started from the real file and detached, so
+    it keeps running after this process exits. A path inside /tmp/.mount_*
+    is never used.
     """
+    env = os.environ if env is None else env
+    pkexec = "/usr/bin/pkexec" if Path("/usr/bin/pkexec").is_file() else "pkexec"
+    target = real_appimage_path(env, argv0)
+    if target:
+        quoted = shlex.quote(target)
+        script = "\n".join([
+            "set -eu",
+            "log=$(mktemp /tmp/disknot-root.XXXXXX.log)",
+            f"/usr/bin/env APPIMAGE_EXTRACT_AND_RUN=1 setsid {quoted} </dev/null >\"$log\" 2>&1 &",
+            "pid=$!",
+            "sleep 2",
+            "if kill -0 \"$pid\" 2>/dev/null; then",
+            "  exit 0",
+            "fi",
+            "echo \"elevated Disknot exited before the window opened\" >&2",
+            "cat \"$log\" >&2 || true",
+            "exit 1",
+        ])
+        return [pkexec, "/bin/sh", "-c", script]
     exe = sys.executable
     frozen = bool(getattr(sys, "frozen", False))
-    prefix = ["pkexec", "env"]
-    appimage = os.environ.get("APPIMAGE")
-    if appimage:
-        prefix.append("APPIMAGE_EXTRACT_AND_RUN=1")
-        return [*prefix, appimage]
-    if frozen:
-        return [*prefix, exe]
+    if frozen and _outside_mount(Path(exe)):
+        return [pkexec, exe]
     src = Path(__file__).resolve().parents[1]
-    return [*prefix, f"PYTHONPATH={src}", exe, "-m", "chafftafarian"]
+    return [pkexec, "/usr/bin/env", f"PYTHONPATH={src}", exe, "-m", "chafftafarian"]
+
+
+def relaunch_as_root() -> tuple[bool, str]:
+    """Block until polkit finishes. Do not treat a still-open dialog as success."""
+    if os.geteuid() == 0:
+        return True, ""
+    argv = relaunch_argv()
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        return False, str(exc)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        if not detail:
+            detail = f"pkexec exited {proc.returncode} with no message"
+        return False, detail
+    return True, ""
 
 
 def worker_argv(config_path: Path) -> list[str]:

@@ -45,7 +45,7 @@ from .wipe.ata import probe_ata
 from .wipe.nvme import parse_sanicap_from_id_ctrl, parse_sanitize_log, result_or_none
 from .wipe.smart import probe_smart
 from .wipe.tools import SubprocessToolRunner
-from .worker_spawn import WipeWorkerProc, gui_pkexec_argv
+from .worker_spawn import WipeWorkerProc, relaunch_argv
 
 # The screenshot-harness views; the frontend routes #/<view> to these.
 VIEWS = ("drives", "sanitize", "chaff", "runs", "settings", "dispatch")
@@ -319,27 +319,45 @@ class Api(QObject):
         return self._guard(self._relaunch_as_root)
 
     def _relaunch_as_root(self) -> str:
-        """Polkit password prompt, then this app again as root."""
+        """Keep this window up until polkit finishes, then hand off.
+
+        Quitting while pkexec is still starting unmounts the AppImage and
+        the password dialog never appears. A failure stays on screen.
+        """
         if os.geteuid() == 0:
             return _dumps({"ok": True, "error": None, "already_root": True})
         try:
-            proc = subprocess.Popen(gui_pkexec_argv(), start_new_session=True)
+            proc = subprocess.Popen(
+                relaunch_argv(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
         except OSError as exc:
             return _dumps({"ok": False, "error": str(exc)})
-        try:
-            rc = proc.wait(timeout=0.6)
-        except subprocess.TimeoutExpired:
-            from PySide6.QtCore import QTimer
-            from PySide6.QtWidgets import QApplication
 
-            app = QApplication.instance()
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        while proc.poll() is None:
             if app is not None:
-                QTimer.singleShot(0, app.quit)
-            return _dumps({"ok": True, "error": None})
-        return _dumps({
-            "ok": False,
-            "error": f"Password prompt was cancelled (exit {rc}).",
-        })
+                app.processEvents()
+            try:
+                proc.wait(timeout=0.05)
+            except subprocess.TimeoutExpired:
+                continue
+        stderr = (proc.stderr.read() if proc.stderr is not None else "") or ""
+        stdout = (proc.stdout.read() if proc.stdout is not None else "") or ""
+        if proc.returncode != 0:
+            detail = (stderr or stdout).strip()
+            if not detail:
+                detail = f"pkexec exited {proc.returncode} with no message"
+            return _dumps({"ok": False, "error": detail})
+        if app is not None:
+            QTimer.singleShot(400, app.quit)
+        return _dumps({"ok": True, "error": None})
 
     @Slot(str, result=str)
     def deviceDetail(self, path: str) -> str:

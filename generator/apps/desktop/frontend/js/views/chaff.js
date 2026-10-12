@@ -54,7 +54,7 @@ export async function render(root) {
   root.innerHTML = `
     ${pageHeader({ exit: '03', title: 'Chaff', lede: edu.copy.chaffLede,
                    coords: 'SYNTHETIC' })}
-    <div class="card-grid">
+    <div class="card-grid" style="grid-template-columns:minmax(0, 1fr)">
       <div id="ch-form"></div>
       <div id="ch-preflight"></div>
       <div id="ch-edu"></div>
@@ -166,6 +166,13 @@ export async function render(root) {
   }
 
   // -- preflight -----------------------------------------------------------
+
+  function showPreflightCard() {
+    preflightEl.innerHTML = card({
+      num: '02', title: 'Preflight', eyebrow: 'NOT RUN YET',
+      children: '<p class="fact">Preflight checks the target and free space before anything is written. It writes nothing.</p>',
+    });
+  }
 
   async function doPreflight() {
     preflightEl.innerHTML = card({
@@ -291,6 +298,7 @@ export async function render(root) {
   }));
 
   renderForm();
+  showPreflightCard();
   if (boot.app_settings?.default_target) doPreflight();
 
   return () => subs.forEach((off) => off());

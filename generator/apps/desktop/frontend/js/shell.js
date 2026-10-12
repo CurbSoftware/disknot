@@ -127,12 +127,13 @@ function renderPrivilege(api) {
     '<p>Wipe and sanitize need root. Disk listing still runs.</p>' +
     '<button type="button" class="btn ghost" id="priv-restart">Restart with privileges</button>' +
     '<p class="priv-err" id="priv-err" hidden></p>';
-  const button = document.getElementById('priv-restart');
+    const button = document.getElementById('priv-restart');
   button?.addEventListener('click', async () => {
     const errEl = document.getElementById('priv-err');
+    if (button) button.setAttribute('aria-disabled', 'true');
     if (errEl) {
-      errEl.hidden = true;
-      errEl.textContent = '';
+      errEl.hidden = false;
+      errEl.textContent = 'Waiting for the password prompt.';
     }
     let ack;
     try {
@@ -140,6 +141,7 @@ function renderPrivilege(api) {
     } catch (err) {
       ack = { ok: false, error: String(err?.message || err) };
     }
+    if (button) button.removeAttribute('aria-disabled');
     if (!ack?.ok && errEl) {
       errEl.hidden = false;
       errEl.textContent = ack?.error || 'Could not start the password prompt.';
