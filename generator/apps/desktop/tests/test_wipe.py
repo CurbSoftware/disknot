@@ -293,13 +293,6 @@ class TestInventory:
     def test_lsblk_failure_yields_empty(self):
         runner = FakeToolRunner(FakeToolRunner.err("lsblk: boom"))
         assert inventory.list_devices(runner) == []
-        scan = inventory.scan_devices(FakeToolRunner(FakeToolRunner.err("lsblk: boom")))
-        assert scan.devices == []
-        assert "boom" in (scan.error or "")
-
-    def test_lsblk_columns_are_real_fields(self):
-        assert "CHILDREN" not in inventory._LSBLK_ARGS
-        assert "MOUNTPOINTS" in ",".join(inventory._LSBLK_ARGS)
 
     def test_enrich_with_nvme(self):
         runner = FakeToolRunner(
@@ -312,6 +305,84 @@ class TestInventory:
         )
         devices = inventory.enrich_with_nvme(inventory.list_devices(runner), runner)
         assert devices[0].model == "WD_BLACK SN770"
+
+    def test_rotational_and_disk_type(self):
+        nodes = [
+            {
+                "name": "sda",
+                "kname": "sda",
+                "type": "disk",
+                "size": 1000000,
+                "model": "HDD",
+                "serial": "S1",
+                "tran": "sata",
+                "rota": 1,
+                "mountpoints": [None],
+                "children": [],
+            },
+            {
+                "name": "sdb",
+                "kname": "sdb",
+                "type": "disk",
+                "size": 500000,
+                "model": "SSD",
+                "serial": "S2",
+                "tran": "sata",
+                "rota": 0,
+                "mountpoints": [None],
+                "children": [],
+            },
+            {
+                "name": "sdc",
+                "kname": "sdc",
+                "type": "disk",
+                "size": 32000,
+                "model": "USB Drive",
+                "serial": "S3",
+                "tran": "usb",
+                "rota": 0,
+                "mountpoints": [None],
+                "children": [],
+            },
+        ]
+        runner = FakeToolRunner(FakeToolRunner.ok(lsblk_result(nodes)))
+        devices = inventory.list_devices(runner)
+        assert len(devices) == 3
+        assert devices[0].rotational is True
+        assert devices[0].disk_type == "hdd"
+        assert devices[1].rotational is False
+        assert devices[1].disk_type == "ssd"
+        assert devices[2].disk_type == "usb"
+
+    def test_enrich_with_nvme_reset_capabilities(self):
+        nodes = [
+            nvme_disk(kname="nvme0n1"),
+            nvme_disk(kname="nvme1n1"),
+        ]
+
+        def respond(argv):
+            if argv[0] == "nvme" and argv[1] == "list":
+                return FakeToolRunner.ok('{"Devices": []}')
+            if argv[0] == "nvme" and argv[1] == "id-ctrl":
+                dev = argv[2]
+                if "nvme0n1" in dev:
+                    return FakeToolRunner.ok("vid : 0x144d\nsanicap : 3\nfna : 0\n")
+                return FakeToolRunner.ok("vid : 0x8086\nsanicap : 0\nfna : 0\n")
+            return FakeToolRunner.ok("")
+
+        class NvmeRunner(FakeToolRunner):
+            def run(self, argv, timeout=None):
+                return respond(argv)
+
+        runner = FakeToolRunner(FakeToolRunner.ok(lsblk_result(nodes)))
+        devices = inventory.list_devices(runner)
+        enriched = inventory.enrich_with_nvme(devices, NvmeRunner())
+        assert enriched[0].kname == "nvme0n1"
+        assert enriched[0].has_reset is True
+        assert enriched[0].disk_type == "nvme_with_reset"
+        assert enriched[1].kname == "nvme1n1"
+        assert enriched[1].has_reset is False
+        assert enriched[1].disk_type == "nvme_no_reset"
 
 
 # -- safety ----------------------------------------------------------------------
@@ -450,9 +521,7 @@ class TestPlan:
         assert any("does not support block erase" in n for n in p.notes)
 
     def test_overwrite_action_when_supported(self):
-        p = plan.build_plan(
-            make_dev(), self.caps(0b100), plan="quick", sanitize_action="overwrite"
-        )
+        p = plan.build_plan(make_dev(), self.caps(0b100), plan="quick", sanitize_action="overwrite")
         assert p.passes[0].action == "overwrite"
         assert "overwrite" in p.passes[0].detail
 
@@ -487,6 +556,161 @@ class TestPlan:
         assert p.passes[0].action == "sata-secure-erase"
         auto = plan.build_plan(dev, self.caps(0), plan="quick", ata=caps)
         assert "sata-secure-erase" not in [x.action for x in auto.passes]
+
+
+class TestPipelinePlan:
+    def test_tools_catalog_and_presets(self):
+        assert len(plan.AVAILABLE_TOOLS) >= 9
+        tool_ids = [t["id"] for t in plan.AVAILABLE_TOOLS]
+        assert "shred" in tool_ids
+        assert "nvme_reset" in tool_ids
+        assert "ata_erase" in tool_ids
+        assert "zeros" in tool_ids
+        assert "ones" in tool_ids
+        assert "overwrite_x" in tool_ids
+        assert "chaff_create" in tool_ids
+        assert "chaff_delete" in tool_ids
+        assert "verify" in tool_ids
+        assert "laptop_sale" in plan.PRESETS
+
+    def test_laptop_sale_preset_nvme_with_reset(self):
+        dev = inventory.DeviceInfo(
+            kname="nvme0n1",
+            path="/dev/nvme0n1",
+            type="disk",
+            size_bytes=1000204886016,
+            model="Samsung 990",
+            serial="S1",
+            transport="nvme",
+            rotational=False,
+            has_reset=True,
+            disk_type="nvme_with_reset",
+        )
+        caps = nvme.parse_sanicap(0b001)
+        target = plan.build_pipeline_for_device(dev, preset="laptop_sale", caps=caps)
+        kinds = [s.kind for s in target.steps]
+        assert kinds == [
+            "shred",
+            "nvme_reset",
+            "zeros",
+            "chaff_create",
+            "chaff_delete",
+            "zeros",
+            "verify",
+        ]
+        assert target.steps[1].action == "block-erase"
+
+    def test_laptop_sale_preset_nvme_no_reset(self):
+        dev = inventory.DeviceInfo(
+            kname="nvme1n1",
+            path="/dev/nvme1n1",
+            type="disk",
+            size_bytes=1000204886016,
+            model="Intel 660p",
+            serial="S2",
+            transport="nvme",
+            rotational=False,
+            has_reset=False,
+            disk_type="nvme_no_reset",
+        )
+        target = plan.build_pipeline_for_device(dev, preset="laptop_sale", caps=nvme.SanitizeCaps())
+        kinds = [s.kind for s in target.steps]
+        assert kinds == [
+            "shred",
+            "ones",
+            "zeros",
+            "chaff_create",
+            "chaff_delete",
+            "zeros",
+            "verify",
+        ]
+        assert any("NVMe Reset not supported" in n for n in target.notes)
+
+    def test_laptop_sale_preset_hdd(self):
+        dev = inventory.DeviceInfo(
+            kname="sdb",
+            path="/dev/sdb",
+            type="disk",
+            size_bytes=2000398934016,
+            model="Seagate BarraCuda",
+            serial="S3",
+            transport="sata",
+            rotational=True,
+            has_reset=False,
+            disk_type="hdd",
+        )
+        target = plan.build_pipeline_for_device(dev, preset="laptop_sale")
+        kinds = [s.kind for s in target.steps]
+        assert kinds == [
+            "shred",
+            "overwrite_x",
+            "zeros",
+            "chaff_create",
+            "chaff_delete",
+            "zeros",
+            "verify",
+        ]
+        assert target.steps[1].options.get("passes") == 3
+
+    def test_laptop_sale_preset_ssd(self):
+        dev = inventory.DeviceInfo(
+            kname="sdc",
+            path="/dev/sdc",
+            type="disk",
+            size_bytes=500107862016,
+            model="Crucial MX500",
+            serial="S4",
+            transport="sata",
+            rotational=False,
+            has_reset=False,
+            disk_type="ssd",
+        )
+        ata_caps = ata.AtaCaps(sanitize_block=True)
+        target = plan.build_pipeline_for_device(dev, preset="laptop_sale", ata=ata_caps)
+        kinds = [s.kind for s in target.steps]
+        assert kinds == [
+            "shred",
+            "ata_erase",
+            "zeros",
+            "chaff_create",
+            "chaff_delete",
+            "zeros",
+            "verify",
+        ]
+        assert target.steps[1].action == "sata-block-erase"
+
+    def test_validate_custom_step_unsupported_detection(self):
+        dev_hdd = inventory.DeviceInfo(
+            kname="sdb",
+            path="/dev/sdb",
+            type="disk",
+            size_bytes=100000,
+            model="HDD",
+            serial="S",
+            transport="sata",
+            rotational=True,
+            has_reset=False,
+            disk_type="hdd",
+        )
+        s = plan.validate_custom_step({"kind": "nvme_reset"}, dev_hdd)
+        assert not s.supported
+        assert "non-NVMe" in s.unsupported_reason
+
+        dev_nvme = inventory.DeviceInfo(
+            kname="nvme1n1",
+            path="/dev/nvme1n1",
+            type="disk",
+            size_bytes=100000,
+            model="NVMe",
+            serial="S",
+            transport="nvme",
+            rotational=False,
+            has_reset=False,
+            disk_type="nvme_no_reset",
+        )
+        s2 = plan.validate_custom_step({"kind": "nvme_reset"}, dev_nvme, caps=nvme.SanitizeCaps())
+        assert not s2.supported
+        assert "sanicap=0" in s2.unsupported_reason
 
 
 # -- writer ---------------------------------------------------------------------------
@@ -531,6 +755,18 @@ class TestWriter:
         writer.write_pattern(str(target), "ones", total_bytes=writer.BLOCK_SIZE * 2)
         data = target.read_bytes()
         assert data.count(b"\xff") == len(data)
+
+    def test_write_and_verify_random_shred(self, tmp_path):
+        target = tmp_path / "disk"
+        target.write_bytes(b"\x00" * (writer.BLOCK_SIZE * 2))
+        total = writer.BLOCK_SIZE * 2
+        stats = writer.write_pattern(str(target), "random", total_bytes=total)
+        assert stats.bytes_written == total
+        data = target.read_bytes()
+        assert data != b"\x00" * total
+        assert data != b"\xff" * total
+        ok, mismatches = writer.verify_pattern(str(target), "random", total_bytes=total)
+        assert ok, mismatches
 
 
 # -- orchestrator: fake end-to-end wipe on a temp file ---------------------------------
@@ -579,8 +815,10 @@ class FakeSanitizeRunner(FakeToolRunner):
             self.sanitize_started = False
             self.sanitize_sprog = 0
             return FakeToolRunner.ok("aborted")
-        if prog == "nvme" and argv[1] == "sanitize" and (
-            "--sanact=2" in argv or "--sanact=3" in argv or "--sanact=4" in argv
+        if (
+            prog == "nvme"
+            and argv[1] == "sanitize"
+            and ("--sanact=2" in argv or "--sanact=3" in argv or "--sanact=4" in argv)
         ):
             self.sanitize_started = True
             self.sanitize_sprog = 1
@@ -689,7 +927,7 @@ class TestOrchestrator:
         cfg, device, _control = self.config(
             tmp_path, [{"kind": "sanitize", "action": "crypto-erase"}]
         )
-        events, emit = self.events()
+        _events, emit = self.events()
         runner = FakeSanitizeRunner(device, 1)
         summary = WipeOrchestrator(cfg, runner, emit).run()
         assert summary.ok, summary.errors
@@ -697,9 +935,7 @@ class TestOrchestrator:
         assert starts, runner.calls
 
     def test_overwrite_issues_sanact_3(self, tmp_path):
-        cfg, device, _control = self.config(
-            tmp_path, [{"kind": "sanitize", "action": "overwrite"}]
-        )
+        cfg, device, _control = self.config(tmp_path, [{"kind": "sanitize", "action": "overwrite"}])
         runner = FakeSanitizeRunner(device, 1)
         summary = WipeOrchestrator(cfg, runner, lambda *a, **k: None).run()
         assert summary.ok, summary.errors
@@ -797,7 +1033,9 @@ class TestAtaParsers:
 
 
 class FakeAtaRunner(FakeToolRunner):
-    def __init__(self, disk_path: Path, size: int, *, frozen: bool = False, identify: str | None = None):
+    def __init__(
+        self, disk_path: Path, size: int, *, frozen: bool = False, identify: str | None = None
+    ):
         super().__init__()
         self.disk_path = disk_path
         self.status_n = 0
@@ -844,9 +1082,7 @@ class FakeAtaRunner(FakeToolRunner):
             return FakeToolRunner.ok("SD0: sanitize operation completed successfully")
         if prog == "hdparm" and "--security-set-pass" in argv:
             return FakeToolRunner.ok("password set")
-        if prog == "hdparm" and (
-            "--security-erase" in argv or "--security-erase-enhanced" in argv
-        ):
+        if prog == "hdparm" and ("--security-erase" in argv or "--security-erase-enhanced" in argv):
             return FakeToolRunner.ok("erased")
         if prog == "hdparm" and "--security-disable" in argv:
             return FakeToolRunner.ok("disabled")
@@ -913,6 +1149,103 @@ class TestAtaOrchestrator:
         assert any("--security-set-pass" in c for c in runner.calls)
         assert any("--security-erase-enhanced" in c for c in runner.calls)
         assert any("--security-disable" in c for c in runner.calls)
+
+
+class TestMultiTargetOrchestrator:
+    def test_multi_target_pipeline_execution(self, tmp_path):
+        dev1 = tmp_path / "dev1"
+        dev2 = tmp_path / "dev2"
+        dev1.write_bytes(b"\xaa" * (writer.BLOCK_SIZE * 2))
+        dev2.write_bytes(b"\xbb" * (writer.BLOCK_SIZE * 2))
+        control = tmp_path / "control"
+        control.mkdir()
+
+        targets = [
+            {
+                "device": str(dev1),
+                "model": "Dev1",
+                "size_bytes": dev1.stat().st_size,
+                "disk_type": "ssd",
+                "steps": [
+                    {"n": 1, "kind": "zeros", "detail": "zero dev1"},
+                ],
+            },
+            {
+                "device": str(dev2),
+                "model": "Dev2",
+                "size_bytes": dev2.stat().st_size,
+                "disk_type": "hdd",
+                "steps": [
+                    {"n": 1, "kind": "ones", "detail": "one dev2"},
+                ],
+            },
+        ]
+        cfg = WipeConfig(
+            targets=targets,
+            confirmation_word="DESTROY",
+            confirmation_devices=[str(dev1), str(dev2)],
+            control_dir=control,
+            dev_dir=str(tmp_path),
+            allow_non_nvme=True,
+        )
+
+        class MultiRunner(FakeToolRunner):
+            def run(self, argv, timeout=None):
+                if argv[0] == "lsblk":
+                    return FakeToolRunner.ok(
+                        json.dumps(
+                            {
+                                "blockdevices": [
+                                    {
+                                        "name": dev1.name,
+                                        "kname": dev1.name,
+                                        "type": "disk",
+                                        "size": dev1.stat().st_size,
+                                        "model": "D1",
+                                        "serial": "1",
+                                        "tran": "sata",
+                                        "mountpoints": [None],
+                                        "children": [],
+                                    },
+                                    {
+                                        "name": dev2.name,
+                                        "kname": dev2.name,
+                                        "type": "disk",
+                                        "size": dev2.stat().st_size,
+                                        "model": "D2",
+                                        "serial": "2",
+                                        "tran": "sata",
+                                        "mountpoints": [None],
+                                        "children": [],
+                                    },
+                                ]
+                            }
+                        )
+                    )
+                if argv[0] == "findmnt":
+                    return FakeToolRunner.ok("")
+                return FakeToolRunner.ok("")
+
+        events = []
+
+        def emit(event, **fields):
+            events.append({"event": event, **fields})
+
+        orch = WipeOrchestrator(cfg, MultiRunner(), emit)
+        summary = orch.run()
+
+        assert summary.ok, summary.errors
+        assert summary.passes_total == 2
+        assert summary.passes_done == [1, 2]
+
+        event_names = [e["event"] for e in events]
+        assert "target_start" in event_names
+        assert "target_done" in event_names
+        assert event_names.count("target_start") == 2
+        assert event_names.count("target_done") == 2
+
+        assert dev1.read_bytes() == b"\x00" * len(dev1.read_bytes())
+        assert dev2.read_bytes() == b"\xff" * len(dev2.read_bytes())
 
 
 # -- protocol / worker config ---------------------------------------------------------

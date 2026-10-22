@@ -26,7 +26,12 @@ def load_config(path: Path) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("config root must be an object")
-    missing = [k for k in config_required_keys() if k not in data]
+    required: tuple[str, ...]
+    if "targets" in data:
+        required = ("targets", "confirmation_word", "control_dir")
+    else:
+        required = config_required_keys()
+    missing = [k for k in required if k not in data]
     if missing:
         raise ValueError(f"config missing keys: {', '.join(missing)}")
     return data

@@ -1,6 +1,7 @@
-// Chafftafarian: views/sanitize.js
-// EXIT 02 · SANITIZE. Plan it, type DESTROY plus the device name, watch
-// every pass. Payload shapes: BRIDGE.md (wipePlan, wipeStart).
+// Disknot: views/sanitize.js
+// EXIT 02 · SANITIZE. Multi-drive pipeline, modular disk tools,
+// predefined sequence presets (e.g. laptop selling), arming & execution.
+// Payload shapes: BRIDGE.md (pipelinePresets, pipelinePlan, wipeStart, wipeAbort).
 
 import { api } from '../api.js';
 import { state, bus } from '../shell.js';
@@ -12,29 +13,48 @@ import * as edu from '../content.js';
 
 const fmtDur = (s) => (s == null ? 'unknown' : s >= 5400 ? `~${Math.round(s / 3600)} h` : `~${Math.round(s / 60)} min`);
 
-const PASS_KIND_CHIP = { sanitize: 'ok', zeros: 'idle', ones: 'idle', verify: 'warn' };
+const STEP_KIND_CHIP = {
+  shred: 'warn',
+  nvme_reset: 'ok',
+  ata_erase: 'ok',
+  zeros: 'idle',
+  ones: 'idle',
+  overwrite_x: 'warn',
+  chaff_create: 'ok',
+  chaff_delete: 'idle',
+  verify: 'warn',
+  sanitize: 'ok',
+};
 
 export async function render(root) {
   const subs = [];
   let devices = [];
-  let plan = null;
-  const form = {
-    device: state.pendingDevice || '', verify: false, plan: 'paranoid',
-    sanitize_action: 'block-erase', unmount: false,
-    confirm_word: '', confirm_device: '',
-  };
+  let toolsCatalog = { tools: [], presets: [] };
+
+  // Determine selected drives
+  let selectedPaths = state.pendingDevices && state.pendingDevices.length
+    ? [...state.pendingDevices]
+    : (state.pendingDevice ? [state.pendingDevice] : []);
+
+  state.pendingDevices = null;
   state.pendingDevice = null;
+
+  let currentPreset = 'laptop_sale';
+  let pipelinePlan = null;
+  let unmountOpt = true;
 
   root.innerHTML = `
     ${pageHeader({ exit: '02', title: 'Sanitize', lede: edu.copy.sanitizeLede,
-                   coords: 'IRREVERSIBLE' })}
-    <div class="card-grid">
-      <div id="sn-form"></div>
-      <div id="sn-plan"></div>
+                   coords: 'MULTI-DRIVE · COMPOSABLE TOOLS · IRREVERSIBLE' })}
+    <div class="card-grid" style="grid-template-columns:1fr">
+      <div id="sn-drives-picker"></div>
     </div>
-    <div id="sn-safety"></div>
-    <section class="section" id="sn-run-section" hidden>
-      ${sectionHead({ num: 'W', title: 'Wipe in progress', meta: '' })}
+    <div style="margin-top:1rem" id="sn-preset-bar"></div>
+    <div id="sn-pipeline-cards" style="margin-top:1rem;display:flex;flex-direction:column;gap:1.2rem"></div>
+    <div id="sn-safety" style="margin-top:1.5rem"></div>
+    <section class="section" id="sn-run-section" hidden style="margin-top:1.5rem">
+      ${sectionHead({ num: 'W', title: 'Sanitization in progress', meta: '' })}
+      <div id="sn-target-badge" style="margin-bottom:0.8rem"></div>
       <div id="sn-progress"></div>
       <div id="sn-next" hidden style="margin-top:0.8rem"></div>
       <div id="sn-log" style="margin-top:0.8rem"></div>
@@ -44,224 +64,313 @@ export async function render(root) {
   const $ = (sel) => root.querySelector(sel);
   const stream = logStream($('#sn-log'));
 
-  function selectedDev() {
-    return devices.find((d) => d.path === form.device);
-  }
+  function renderDrivesPicker() {
+    const selectable = devices.filter((d) => !d.os_disk);
+    const osDisks = devices.filter((d) => d.os_disk);
 
-  function renderForm() {
-    const dev = selectedDev();
-    const nvme = !!dev?.is_nvme;
-    const cryptoOk = !!(dev?.sanitize?.crypto_erase);
-    const overwriteOk = !!(dev?.sanitize?.overwrite);
-    const ata = dev?.ata || null;
-    const sataBlockOk = !!(ata && ata.sanitize_block && !ata.frozen);
-    const sataCryptoOk = !!(ata && ata.sanitize_crypto && !ata.frozen);
-    const sataSecureOk = !!(ata && ata.security_erase && !ata.frozen);
-    if (nvme) {
-      if (form.sanitize_action === 'crypto-erase' && !cryptoOk) form.sanitize_action = 'block-erase';
-      if (form.sanitize_action === 'overwrite' && !overwriteOk) form.sanitize_action = 'block-erase';
-      if (String(form.sanitize_action).startsWith('sata-')) form.sanitize_action = 'block-erase';
-    } else if (dev) {
-      if (!String(form.sanitize_action).startsWith('sata-')) {
-        form.sanitize_action = sataBlockOk ? 'sata-block-erase'
-          : (sataCryptoOk ? 'sata-crypto' : 'sata-block-erase');
-      }
-    }
-    const options = ['<option value="">choose a device</option>']
-      .concat(devices.map((d) =>
-        `<option value="${esc(d.path)}"${d.path === form.device ? ' selected' : ''}>` +
-        `${esc(d.path)}: ${esc(d.model || d.kname)} (${edu.fmtBytes(d.size_bytes)})` +
-        `${d.os_disk ? ' · OS DISK' : ''}</option>`));
-    const anySata = sataBlockOk || sataCryptoOk || sataSecureOk;
-    const methodHint = nvme
-      ? (edu.ACTION_DOES[form.sanitize_action] || 'This drive does not support that sanitize method.')
-      : (anySata && edu.ACTION_DOES[form.sanitize_action]
-        ? edu.ACTION_DOES[form.sanitize_action]
-        : edu.ataIs(ata));
-    const methodRow = nvme
-      ? `<div class="seg" id="sn-action">
-            <button type="button" data-action="block-erase" class="${form.sanitize_action === 'block-erase' ? 'on' : ''}">block erase</button>
-            <button type="button" data-action="crypto-erase" class="${form.sanitize_action === 'crypto-erase' ? 'on' : ''}"
-              ${cryptoOk ? '' : 'disabled'}>crypto erase</button>
-            <button type="button" data-action="overwrite" class="${form.sanitize_action === 'overwrite' ? 'on' : ''}"
-              ${overwriteOk ? '' : 'disabled'}>overwrite</button>
-          </div>`
-      : `<div class="seg" id="sn-action">
-            <button type="button" data-action="sata-block-erase" class="${form.sanitize_action === 'sata-block-erase' ? 'on' : ''}"
-              ${sataBlockOk ? '' : 'disabled'}>block erase</button>
-            <button type="button" data-action="sata-crypto" class="${form.sanitize_action === 'sata-crypto' ? 'on' : ''}"
-              ${sataCryptoOk ? '' : 'disabled'}>crypto scramble</button>
-            <button type="button" data-action="sata-secure-erase" class="${form.sanitize_action === 'sata-secure-erase' ? 'on' : ''}"
-              ${sataSecureOk ? '' : 'disabled'}>security erase</button>
-          </div>`;
-    $('#sn-form').innerHTML = card({
-      num: '01', title: 'Target and plan', eyebrow: 'WHAT WILL BE DESTROYED',
-      children: `<div class="fgrid">
-        <div class="ffield"><label>Device</label>
-          <select class="finput" id="sn-device">${options.join('')}</select>
-          ${dev ? `<span class="fhint">${esc(edu.driveIs(dev))} ${esc(edu.driveRole(dev))}</span>` : ''}
+    const checkItems = selectable.map((d) => {
+      const isSel = selectedPaths.includes(d.path);
+      return `
+        <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:var(--well);border-radius:4px;cursor:pointer">
+          <input type="checkbox" data-path="${esc(d.path)}"${isSel ? ' checked' : ''} class="sn-drv-chk">
+          <span class="mono" style="font-weight:600">${esc(d.path)}</span>
+          <span class="micro">${esc(d.model || d.kname)} (${edu.fmtBytes(d.size_bytes)})</span>
+          <span class="grow"></span>
+          ${raw(chip(isSel ? 'ok' : 'idle', edu.diskTypeLabel(d)))}
+        </label>`;
+    }).join('');
+
+    const osItems = osDisks.map((d) => `
+      <div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:var(--well);opacity:0.6;border-radius:4px">
+        <input type="checkbox" disabled>
+        <span class="mono" style="font-weight:600">${esc(d.path)}</span>
+        <span class="micro">${esc(d.model || d.kname)} (${edu.fmtBytes(d.size_bytes)})</span>
+        <span class="grow"></span>
+        <span class="chip err"><span class="dot"></span>OS DISK · LOCKED</span>
+      </div>`).join('');
+
+    $('#sn-drives-picker').innerHTML = card({
+      num: '01', title: 'Target Drives Selection', eyebrow: `${selectedPaths.length} DRIVES SELECTED`,
+      children: `
+        <p class="fact">Select the drives you wish to sanitize. OS drives hosting the live system cannot be selected.</p>
+        <div style="display:flex;flex-direction:column;gap:0.4rem;margin:0.8rem 0">
+          ${checkItems || '<p class="dim">No non-OS drives available.</p>'}
+          ${osItems}
         </div>
-        <div class="ffield"><label>Plan</label>
-          <div class="seg" id="sn-planmode">
-            <button type="button" data-plan="paranoid" class="${form.plan === 'paranoid' ? 'on' : ''}">paranoid</button>
-            <button type="button" data-plan="standard" class="${form.plan === 'standard' ? 'on' : ''}">standard</button>
-            <button type="button" data-plan="quick" class="${form.plan === 'quick' ? 'on' : ''}">quick</button>
-          </div>
-          <span class="fhint">${esc(edu.PLAN_DOES[form.plan])}</span>
-        </div>
-        <div class="ffield"><label>Sanitize method</label>
-          ${methodRow}
-          <span class="fhint">${esc(methodHint)}</span>
-        </div>
-        <div class="ffield"><label>Options</label>
-          <label style="display:flex;gap:0.5rem;align-items:center">
-            <input type="checkbox" id="sn-verify"${form.verify ? ' checked' : ''}> verify after</label>
-          <span class="fhint">${esc(edu.OPTION_DOES.verify)}</span>
-          <label style="display:flex;gap:0.5rem;align-items:center;margin-top:0.6rem">
-            <input type="checkbox" id="sn-unmount"${form.unmount ? ' checked' : ''}> unmount partitions for me</label>
-          <span class="fhint">${esc(edu.OPTION_DOES.unmount)}</span>
-        </div>
-      </div>
-      <div style="margin-top:1rem">
-        ${btn({ label: 'Build the plan', kind: 'primary', id: 'sn-plan-btn',
-                tip: 'Probe capabilities and compute passes. Writes nothing.' })}
-      </div>`,
+        <label style="display:flex;gap:0.5rem;align-items:center;margin-top:0.6rem;cursor:pointer">
+          <input type="checkbox" id="sn-unmount-all"${unmountOpt ? ' checked' : ''}> unmount partitions for me
+        </label>
+      `,
     });
-    $('#sn-device').addEventListener('change', async (e) => {
-      form.device = e.target.value;
-      await enrichSelected();
-      renderForm();
+
+    root.querySelectorAll('.sn-drv-chk').forEach((chk) => {
+      chk.addEventListener('change', async (e) => {
+        const p = e.target.dataset.path;
+        if (e.target.checked) {
+          if (!selectedPaths.includes(p)) selectedPaths.push(p);
+        } else {
+          selectedPaths = selectedPaths.filter((x) => x !== p);
+        }
+        await loadPreset(currentPreset);
+      });
+    });
+
+    $('#sn-unmount-all')?.addEventListener('change', (e) => {
+      unmountOpt = e.target.checked;
       buildPlan();
     });
-    $('#sn-planmode').addEventListener('click', (e) => {
-      const b = e.target.closest('button[data-plan]');
+  }
+
+  function renderPresetBar() {
+    const presetsList = [
+      { id: 'laptop_sale', label: 'Selling Laptop (Recommended)' },
+      { id: 'paranoid_6pass', label: 'Paranoid 6-Pass' },
+      { id: 'nist_800_88_purge', label: 'NIST SP 800-88 Purge' },
+      { id: 'quick_wipe', label: 'Quick Wipe' },
+      { id: 'chaff_conceal', label: 'Chaff & Conceal' },
+      { id: 'custom', label: 'Custom Sequence' },
+    ];
+
+    const buttons = presetsList.map((pr) => `
+      <button type="button" data-preset="${pr.id}" class="${currentPreset === pr.id ? 'on' : ''}">${pr.label}</button>
+    `).join('');
+
+    $('#sn-preset-bar').innerHTML = card({
+      num: '02', title: 'Sequence Preset Template', eyebrow: 'PREDEFINED OR CUSTOM STEPS',
+      children: `
+        <div class="seg" id="sn-preset-seg" style="flex-wrap:wrap">
+          ${buttons}
+        </div>
+        <p class="fhint" style="margin-top:0.6rem">${esc(edu.PRESET_DOES[currentPreset] || '')}</p>
+      `,
+    });
+
+    $('#sn-preset-seg')?.addEventListener('click', async (e) => {
+      const b = e.target.closest('button[data-preset]');
       if (!b) return;
-      form.plan = b.dataset.plan;
-      renderForm();
-      buildPlan();
+      currentPreset = b.dataset.preset;
+      renderPresetBar();
+      await loadPreset(currentPreset);
     });
-    $('#sn-action').addEventListener('click', (e) => {
-      const b = e.target.closest('button[data-action]');
-      if (!b || b.disabled) return;
-      form.sanitize_action = b.dataset.action;
-      renderForm();
-      buildPlan();
-    });
-    $('#sn-verify').addEventListener('change', (e) => { form.verify = e.target.checked; buildPlan(); });
-    $('#sn-unmount').addEventListener('change', (e) => { form.unmount = e.target.checked; buildPlan(); });
-    $('#sn-plan-btn').addEventListener('click', buildPlan);
   }
 
-  async function enrichSelected() {
-    const dev = selectedDev();
-    if (!dev || dev.is_nvme || dev.ata !== undefined) return;
-    const out = await api.deviceDetail(dev.path);
-    if (out && !out.error) {
-      dev.ata = out.ata || null;
-    } else {
-      dev.ata = null;
+  async function loadPreset(presetName) {
+    if (!selectedPaths.length) {
+      pipelinePlan = { targets: [], blockers: ['No drives selected.'], confirmation: { word: 'DESTROY', devices: [] } };
+      renderPipelineCards();
+      renderSafety();
+      return;
     }
+    const res = await api.pipelinePresets(presetName, JSON.stringify(selectedPaths));
+    pipelinePlan = typeof res === 'string' ? JSON.parse(res) : res;
+    renderPipelineCards();
+    renderSafety();
   }
 
-  function planConfig() {
-    return {
-      device: form.device,
-      verify: form.verify,
-      plan: form.plan,
-      quick: form.plan === 'quick',
-      unmount: form.unmount,
-      sanitize_action: form.sanitize_action,
-    };
+  function renderPipelineCards() {
+    const container = $('#sn-pipeline-cards');
+    if (!container) return;
+    if (!pipelinePlan || !pipelinePlan.targets || !pipelinePlan.targets.length) {
+      container.innerHTML = card({
+        num: '03', title: 'Pipeline Steps', eyebrow: 'NO TARGETS',
+        children: '<p class="dim">Select one or more drives above to configure sanitization steps.</p>',
+      });
+      return;
+    }
+
+    container.innerHTML = pipelinePlan.targets.map((t, tIdx) => {
+      const dev = devices.find((d) => d.path === t.device) || {};
+      const typeLabel = edu.diskTypeLabel(dev);
+
+      const stepsHtml = (t.steps || []).map((s, sIdx) => {
+        const chipKind = STEP_KIND_CHIP[s.kind] || 'idle';
+        const badge = chip(chipKind, s.kind.toUpperCase().replace('_', ' '));
+        const unsuppWarn = !s.supported && s.unsupported_reason
+          ? `<span class="micro" style="color:var(--danger)">${esc(s.unsupported_reason)}</span>`
+          : '';
+
+        return `
+          <div style="display:flex;align-items:center;gap:0.8rem;padding:0.6rem 0.8rem;background:var(--well);border-radius:4px;margin-bottom:0.4rem">
+            <span class="mono" style="font-weight:700">#${s.n}</span>
+            ${badge}
+            <div style="display:flex;flex-direction:column;flex:1">
+              <span class="fact" style="margin:0">${esc(s.detail)}</span>
+              ${unsuppWarn}
+            </div>
+            <span class="micro">${fmtDur(s.est_s)}</span>
+            <div style="display:flex;gap:0.2rem">
+              <button type="button" class="btn ghost btn-step-up" data-tidx="${tIdx}" data-sidx="${sIdx}" ${sIdx === 0 ? 'disabled' : ''} title="Move Step Up">▲</button>
+              <button type="button" class="btn ghost btn-step-dn" data-tidx="${tIdx}" data-sidx="${sIdx}" ${sIdx === t.steps.length - 1 ? 'disabled' : ''} title="Move Step Down">▼</button>
+              <button type="button" class="btn danger btn-step-del" data-tidx="${tIdx}" data-sidx="${sIdx}" title="Remove Step">✕</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Add Step Options
+      const isNvmeWithReset = dev.disk_type === 'nvme_with_reset' || (dev.is_nvme && dev.has_reset);
+      const isSata = !dev.is_nvme;
+
+      const addOptions = [
+        '<option value="">+ Add Step to this Drive...</option>',
+        '<option value="shred">Shred (Random Overwrite)</option>',
+        isNvmeWithReset
+          ? '<option value="nvme_reset">NVMe Reset / Hardware Sanitize</option>'
+          : '<option value="nvme_reset" disabled>NVMe Reset (Not supported on this drive)</option>',
+        isSata
+          ? '<option value="ata_erase">ATA Firmware Erase</option>'
+          : '<option value="ata_erase" disabled>ATA Erase (NVMe drives use NVMe Reset)</option>',
+        '<option value="zeros">Write Zeros (0x00)</option>',
+        '<option value="ones">Write Ones (0xFF)</option>',
+        '<option value="overwrite_x">Overwrite X Times (Multi-pass)</option>',
+        '<option value="chaff_create">Create Chaff (Synthetic Decoy Files)</option>',
+        '<option value="chaff_delete">Delete Chaff</option>',
+        '<option value="verify">Verify (Sampled Read-Back)</option>',
+      ].join('');
+
+      return card({
+        num: `03.${tIdx + 1}`,
+        title: `${t.device} · ${t.model || 'Disk'}`,
+        eyebrow: `${typeLabel.toUpperCase()} · ${edu.fmtBytes(t.size_bytes)}`,
+        right: raw(chip('ok', `${t.steps.length} STEPS`)),
+        children: `
+          <div style="margin-bottom:0.8rem">
+            ${stepsHtml || '<p class="dim">No steps configured for this drive.</p>'}
+          </div>
+          <div style="display:flex;align-items:center;gap:0.8rem">
+            <select class="finput sn-add-step-select" data-tidx="${tIdx}" style="max-width:320px">
+              ${addOptions}
+            </select>
+          </div>
+        `,
+      });
+    }).join('');
+
+    // Attach step control listeners
+    container.querySelectorAll('.btn-step-up').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        const tIdx = Number(b.dataset.tidx);
+        const sIdx = Number(b.dataset.sidx);
+        const steps = pipelinePlan.targets[tIdx].steps;
+        if (sIdx > 0) {
+          const temp = steps[sIdx - 1];
+          steps[sIdx - 1] = steps[sIdx];
+          steps[sIdx] = temp;
+          currentPreset = 'custom';
+          renderPresetBar();
+          buildPlan();
+        }
+      });
+    });
+
+    container.querySelectorAll('.btn-step-dn').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        const tIdx = Number(b.dataset.tidx);
+        const sIdx = Number(b.dataset.sidx);
+        const steps = pipelinePlan.targets[tIdx].steps;
+        if (sIdx < steps.length - 1) {
+          const temp = steps[sIdx + 1];
+          steps[sIdx + 1] = steps[sIdx];
+          steps[sIdx] = temp;
+          currentPreset = 'custom';
+          renderPresetBar();
+          buildPlan();
+        }
+      });
+    });
+
+    container.querySelectorAll('.btn-step-del').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        const tIdx = Number(b.dataset.tidx);
+        const sIdx = Number(b.dataset.sidx);
+        pipelinePlan.targets[tIdx].steps.splice(sIdx, 1);
+        currentPreset = 'custom';
+        renderPresetBar();
+        buildPlan();
+      });
+    });
+
+    container.querySelectorAll('.sn-add-step-select').forEach((sel) => {
+      sel.addEventListener('change', (e) => {
+        const kind = e.target.value;
+        if (!kind) return;
+        const tIdx = Number(sel.dataset.tidx);
+        const steps = pipelinePlan.targets[tIdx].steps;
+        steps.push({
+          n: steps.length + 1,
+          kind: kind,
+          detail: edu.TOOL_DOES[kind] || `Execute ${kind}`,
+          supported: true,
+        });
+        currentPreset = 'custom';
+        renderPresetBar();
+        buildPlan();
+      });
+    });
   }
 
   async function buildPlan() {
-    if (!form.device) return;
-    plan = await api.wipePlan(planConfig());
-    renderPlan();
-  }
-
-  function renderPlan() {
-    if (!plan) return;
-    if (plan.error) {
-      $('#sn-plan').innerHTML = card({
-        num: '02', title: 'Plan', eyebrow: 'REFUSED',
-        children: `<p class="fact">${esc(plan.error)}</p>` });
-      $('#sn-safety').innerHTML = '';
-      return;
-    }
-    $('#sn-plan').innerHTML = card({
-      num: '02', title: 'The plan', eyebrow: `${plan.passes.length} PASSES · ${edu.fmtBytes(plan.size_bytes)}`,
-      right: raw(chip(plan.sanitize_supported ? 'ok' : 'warn',
-                      plan.sanitize_supported ? 'SANITIZE AVAILABLE' : 'NO SANITIZE')),
-      children: table(
-        ['#', 'Pass', 'Kind', 'This pass will', 'Est.'],
-        plan.passes.map((p) => [
-          raw(`<span class="mono">${p.n}</span>`),
-          raw(`<span class="mono">${esc(p.kind)}</span>`),
-          raw(chip(PASS_KIND_CHIP[p.kind] || 'idle', p.kind)),
-          esc(p.detail),
-          raw(`<span class="micro">${fmtDur(p.est_s)}</span>`),
-        ])) + (plan.notes || []).map((n) =>
-          `<p class="fact" style="color:var(--amber)">${esc(n)}</p>`).join(''),
-    });
+    if (!pipelinePlan || !pipelinePlan.targets) return;
+    const cfg = {
+      targets: pipelinePlan.targets,
+      preset: currentPreset,
+      unmount: unmountOpt,
+    };
+    const res = await api.pipelinePlan(JSON.stringify(cfg));
+    pipelinePlan = typeof res === 'string' ? JSON.parse(res) : res;
+    renderPipelineCards();
     renderSafety();
   }
 
   function renderSafety() {
-    const blockers = plan.blockers || [];
+    const blockers = pipelinePlan ? (pipelinePlan.blockers || []) : ['No plan built.'];
+    const targets = pipelinePlan ? (pipelinePlan.targets || []) : [];
+    const devicesList = targets.map((t) => t.device).join(', ');
+
     $('#sn-safety').innerHTML = card({
-      num: '03', title: 'Safety', eyebrow: 'ARMING',
-      right: raw(chip(blockers.length ? 'err' : 'ok',
-                      blockers.length ? 'BLOCKED' : 'CLEAR TO CONFIRM')),
+      num: '04', title: 'Safety & Destruction Confirmation', eyebrow: 'ARMING',
+      right: raw(chip(blockers.length ? 'err' : 'ok', blockers.length ? 'BLOCKED' : 'READY TO ARM')),
       children: `
         <p class="fact">${esc(edu.whyTypedDestroy.body)}</p>
         ${blockers.length ? `<div style="margin-top:0.7rem">${
           blockers.map((b) => `<p class="fact" style="color:var(--danger)">${esc(b)}</p>`).join('')
         }</div>` : ''}
         <div style="margin-top:1rem" id="sn-confirm-block">
-          <p class="fact" style="margin-bottom:0.5rem">${esc(edu.armDestroy(form.device))}</p>
+          <p class="fact" style="margin-bottom:0.5rem">
+            Type <strong>DESTROY</strong> to permanently wipe: <span class="mono">${esc(devicesList || 'no drives')}</span>
+          </p>
           <div class="confirmbox">
             <input class="finput" id="sn-confirm-word" placeholder="DESTROY" maxlength="10" spellcheck="false">
-            <input class="finput" id="sn-confirm-device" placeholder="${esc(form.device)}" spellcheck="false">
-            ${btn({ label: 'DESTROY THE DRIVE', kind: 'danger', id: 'sn-confirm-go',
-                    tip: 'Starts the root worker via pkexec' })}
+            ${btn({ label: 'DESTROY SELECTED DRIVES', kind: 'danger', id: 'sn-confirm-go',
+                    tip: 'Starts the root worker via pkexec to execute the pipeline' })}
           </div>
         </div>
-        <p class="fact" style="margin-top:0.9rem">${esc(edu.mountedRefusal.body)}</p>
-        <p class="micro" style="margin:1rem 0 0.4rem;color:var(--ink-4)">IF THIS HAPPENS</p>
-        ${edu.troubleshooting.map((t) =>
-          `<p class="fact"><strong>${esc(t.happen)}</strong> ${esc(t.do)}</p>`).join('')}`,
+      `,
     });
+
     const go = $('#sn-confirm-go');
     const check = () => {
       const word = $('#sn-confirm-word').value.trim().toUpperCase();
-      const devc = $('#sn-confirm-device').value.trim();
       go.setAttribute('aria-disabled',
-        blockers.length || word !== 'DESTROY' || devc !== form.device ? 'true' : 'false');
+        blockers.length || word !== 'DESTROY' || !targets.length ? 'true' : 'false');
     };
-    $('#sn-confirm-word').addEventListener('input', check);
-    $('#sn-confirm-device').addEventListener('input', check);
-    go.setAttribute('aria-disabled', 'true');
-    go.addEventListener('click', doStart);
+    $('#sn-confirm-word')?.addEventListener('input', check);
+    go?.setAttribute('aria-disabled', 'true');
+    go?.addEventListener('click', doStart);
   }
 
   async function doStart() {
-    if (!state.root) {
-      $('#sn-run-section').hidden = false;
-      stream.clear();
-      stream.append('[INFO] Wipe and sanitize need root. Waiting for the password prompt.');
-      const priv = await api.relaunchAsRoot();
-      if (!priv?.ok) {
-        stream.append(`[ERROR] ${priv?.error || 'Could not start the password prompt.'}`);
-      }
-      return;
-    }
-    form.confirm_word = $('#sn-confirm-word').value.trim().toUpperCase();
-    form.confirm_device = $('#sn-confirm-device').value.trim();
-    const ack = await api.wipeStart({
-      ...planConfig(),
-      confirm_word: form.confirm_word, confirm_device: form.confirm_device,
-    });
+    const word = $('#sn-confirm-word').value.trim().toUpperCase();
+    const targetDevs = pipelinePlan.targets.map((t) => t.device);
+
+    const ackStr = await api.wipeStart(JSON.stringify({
+      targets: pipelinePlan.targets,
+      confirm_word: word,
+      confirm_devices: targetDevs,
+      unmount: unmountOpt,
+    }));
+
+    const ack = typeof ackStr === 'string' ? JSON.parse(ackStr) : ackStr;
     $('#sn-run-section').hidden = false;
     const next = $('#sn-next');
     if (next) {
@@ -273,28 +382,47 @@ export async function render(root) {
       stream.append(`[ERROR] ${ack.error || 'start refused'}`);
       return;
     }
-    stream.append('[INFO] pkexec: authorize when the system dialog appears');
-    renderPasses([]);
+    stream.append('[INFO] pkexec: authorize when the system prompt appears');
+    renderExecutionProgress(0, 0, {});
   }
 
-  function renderPasses(progressByPass) {
-    if (!plan) return;
-    $('#sn-progress').innerHTML = plan.passes.map((p) => {
-      const prog = progressByPass[p.n];
-      const pct = prog != null ? Math.round(prog) : (progressByPass.done?.includes(p.n) ? 100 : 0);
-      return `<div class="plane"><div class="plane-top">` +
-        `<span class="plane-label">PASS ${p.n} · ${esc(p.kind.toUpperCase())}: ${esc(p.detail)}</span>` +
-        `<span class="plane-pct">${pct}%</span></div>` +
-        `<div class="plane-track"><i style="width:${pct}%"></i></div></div>`;
+  function renderExecutionProgress(targetIdx, passNo, progMap) {
+    const targets = pipelinePlan ? (pipelinePlan.targets || []) : [];
+    const targetBadgeEl = $('#sn-target-badge');
+    if (targetBadgeEl) {
+      if (targets.length > 1) {
+        targetBadgeEl.innerHTML = `<span class="chip ok">TARGET ${targetIdx || 1} OF ${targets.length}</span>`;
+      } else {
+        targetBadgeEl.innerHTML = '';
+      }
+    }
+
+    let allPasses = [];
+    targets.forEach((t) => {
+      (t.steps || []).forEach((s) => allPasses.push({ ...s, device: t.device }));
+    });
+
+    $('#sn-progress').innerHTML = allPasses.map((p, idx) => {
+      const passNum = idx + 1;
+      const pct = progMap[passNum] ?? (progMap.done?.includes(passNum) ? 100 : 0);
+      return `
+        <div class="plane">
+          <div class="plane-top">
+            <span class="plane-label">[${esc(p.device)}] PASS ${passNum} · ${esc(p.kind.toUpperCase())}: ${esc(p.detail)}</span>
+            <span class="plane-pct">${Math.round(pct)}%</span>
+          </div>
+          <div class="plane-track"><i style="width:${Math.round(pct)}%"></i></div>
+        </div>`;
     }).join('') + `
       <div style="margin-top:0.8rem;display:flex;gap:0.6rem">
-        ${btn({ label: 'Cancel the wipe', kind: 'danger', id: 'sn-cancel',
-                tip: 'Stops at the next checkpoint. A sanitize in flight is aborted with sanact=0.' })}
+        ${btn({ label: 'Cancel Pipeline', kind: 'danger', id: 'sn-cancel-pipe',
+                tip: 'Stops at the next block checkpoint or pass boundary' })}
       </div>`;
-    $('#sn-cancel').onclick = () => api.wipeAbort();
+
+    $('#sn-cancel-pipe')?.addEventListener('click', () => api.wipeAbort());
   }
 
-  const passProgress = {};
+  const liveProgress = { currentTarget: 1 };
   subs.push(bus.on('line', (l) => {
     if (l.channel === 'wipe.log') {
       if ($('#sn-run-section').hidden) $('#sn-run-section').hidden = false;
@@ -304,58 +432,52 @@ export async function render(root) {
     if (l.channel !== 'wipe') return;
     let ev;
     try { ev = JSON.parse(l.text); } catch { return; }
-    if (ev.event === 'pass_start') {
-      passProgress[ev.passno] = 0;
-      renderPasses(passProgress);
+
+    if (ev.event === 'target_start') {
+      liveProgress.currentTarget = ev.target_index;
+      renderExecutionProgress(ev.target_index, 0, liveProgress);
+    } else if (ev.event === 'pass_start') {
+      liveProgress[ev.passno] = 0;
+      renderExecutionProgress(liveProgress.currentTarget, ev.passno, liveProgress);
     } else if (ev.event === 'pass_progress' || ev.event === 'sanitize_progress') {
-      passProgress[ev.passno] = ev.percent ?? 0;
-      renderPasses(passProgress);
+      liveProgress[ev.passno] = ev.percent ?? 0;
+      renderExecutionProgress(liveProgress.currentTarget, ev.passno, liveProgress);
     } else if (ev.event === 'verify_progress') {
-      passProgress[ev.passno] = (ev.checked / ev.of) * 100;
-      renderPasses(passProgress);
+      liveProgress[ev.passno] = (ev.checked / ev.of) * 100;
+      renderExecutionProgress(liveProgress.currentTarget, ev.passno, liveProgress);
     } else if (ev.event === 'done') {
-      passProgress.done = ev.passes_done || [];
-      renderPasses(passProgress);
+      liveProgress.done = ev.passes_done || [];
+      renderExecutionProgress(liveProgress.currentTarget, 0, liveProgress);
     }
   }));
 
   subs.push(bus.on('report', ({ channel, data }) => {
     if (channel !== 'wipe.summary') return;
-    stream.append(`[DONE] ${data.cancelled ? 'cancelled' : (data.ok ? 'wipe complete' : 'wipe ended with problems')}`);
+    const ok = data.ok;
+    const canc = data.cancelled;
+    stream.append(`[DONE] ${canc ? 'Pipeline cancelled by user' : (ok ? 'Pipeline completed successfully' : 'Pipeline ended with issues')}`);
     const next = $('#sn-next');
-    if (!next) return;
-    next.hidden = false;
-    next.innerHTML = card({
-      num: 'N', title: 'Next', eyebrow: 'AFTER THE WIPE',
-      children: `<p class="fact">${esc(edu.afterWipeIs(data, plan))}</p>`,
-    });
+    if (next) {
+      next.hidden = false;
+      next.innerHTML = card({
+        num: 'N', title: 'Pipeline Finished', eyebrow: 'STATUS',
+        children: `<p class="fact">${canc ? 'Operation was cancelled.' : (ok ? 'All configured drives have been sanitized according to their respective step pipelines.' : 'Check logs for any errors.')}</p>`,
+      });
+    }
   }));
 
-  const listed = await api.deviceList();
-  devices = Array.isArray(listed) ? listed : (listed && Array.isArray(listed.devices) ? listed.devices : []);
-  if (listed && listed.error && !devices.length) {
-    root.innerHTML = pageHeader({ exit: '02', title: 'Sanitize', lede: edu.copy.sanitizeLede }) +
-      emptyState({
-        code: '02', headline: 'Could not list disks',
-        guidance: String(listed.error),
-      });
-    return () => subs.forEach((off) => off());
+  // Bootstrap data
+  const rawList = await api.deviceList();
+  devices = Array.isArray(rawList) ? rawList : (typeof rawList === 'string' ? JSON.parse(rawList) : []);
+
+  if (!selectedPaths.length) {
+    const firstNonOs = devices.find((d) => !d.os_disk);
+    if (firstNonOs) selectedPaths.push(firstNonOs.path);
   }
-  if (!devices.length) {
-    root.innerHTML = pageHeader({ exit: '02', title: 'Sanitize', lede: edu.copy.sanitizeLede }) +
-      emptyState({
-        code: '02', headline: 'No devices to sanitize',
-        guidance: 'ATTACH A DRIVE AND OPEN EXIT 01 DRIVES',
-      });
-    return () => subs.forEach((off) => off());
-  }
-  if (!form.device) {
-    form.device = (devices.find((d) => !d.os_disk) || devices[0]).path;
-  }
-  renderForm();
-  await enrichSelected();
-  renderForm();
-  await buildPlan();
+
+  renderDrivesPicker();
+  renderPresetBar();
+  await loadPreset(currentPreset);
 
   return () => subs.forEach((off) => off());
 }

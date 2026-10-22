@@ -15,6 +15,8 @@ from collections.abc import Iterable, Iterator
 EVENT_TYPES = (
     "hello",
     "log",
+    "target_start",
+    "target_done",
     "pass_start",
     "pass_progress",
     "sanitize_progress",

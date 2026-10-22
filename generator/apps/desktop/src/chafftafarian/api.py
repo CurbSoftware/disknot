@@ -13,9 +13,7 @@ surface both of those talk to.
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import threading
 import traceback
 from collections.abc import Callable
@@ -45,7 +43,7 @@ from .wipe.ata import probe_ata
 from .wipe.nvme import parse_sanicap_from_id_ctrl, parse_sanitize_log, result_or_none
 from .wipe.smart import probe_smart
 from .wipe.tools import SubprocessToolRunner
-from .worker_spawn import WipeWorkerProc, relaunch_argv
+from .worker_spawn import WipeWorkerProc
 
 # The screenshot-harness views; the frontend routes #/<view> to these.
 VIEWS = ("drives", "sanitize", "chaff", "runs", "settings", "dispatch")
@@ -152,7 +150,6 @@ class Api(QObject):
             "tools": self._tools(),
             "busy": self._busy(),
             "kind": self._kind(),
-            "root": os.geteuid() == 0,
             "app_settings": {
                 "allow_non_nvme": bool(self._app_settings.get("allow_non_nvme", False)),
                 "default_target": self._app_settings.get("default_target", ""),
@@ -248,8 +245,10 @@ class Api(QObject):
 
     # ------------------------------------------------------------- devices
 
-    def _device_dicts(self, devices) -> list[dict]:
-        """Safety marks and sanitize caps, as the DRIVES view renders them."""
+    def _device_list(self) -> list[dict]:
+        """Inventory + safety marks + sanitize caps, as the DRIVES view
+        renders them. Never raises: a failed probe degrades to unknown."""
+        devices = inventory.enrich_with_nvme(inventory.list_devices(self._runner), self._runner)
         try:
             os_knames = safety.os_disk_knames(self._runner)
         except Exception:
@@ -266,6 +265,10 @@ class Api(QObject):
                     "crypto_erase": parsed.crypto_erase,
                     "overwrite": parsed.overwrite,
                 }
+            has_reset = dev.has_reset or bool(caps and caps.get("supported"))
+            disk_type = dev.disk_type
+            if dev.is_nvme:
+                disk_type = "nvme_with_reset" if has_reset else "nvme_no_reset"
             out.append(
                 {
                     "kname": dev.kname,
@@ -276,6 +279,9 @@ class Api(QObject):
                     "model": dev.model,
                     "serial": dev.serial,
                     "is_nvme": dev.is_nvme,
+                    "rotational": dev.rotational,
+                    "has_reset": has_reset,
+                    "disk_type": disk_type,
                     "os_disk": dev.kname in os_knames,
                     "mounted": dev.mounted,
                     "swap": dev.swap,
@@ -294,70 +300,12 @@ class Api(QObject):
             )
         return out
 
-    def _device_list(self) -> list[dict]:
-        """Inventory + safety marks + sanitize caps. A failed probe degrades
-        to an empty list; deviceList carries the lsblk error separately."""
-        devices = inventory.enrich_with_nvme(inventory.list_devices(self._runner), self._runner)
-        return self._device_dicts(devices)
-
     @Slot(result=str)
     def deviceList(self) -> str:
-        return self._guard(
-            self._device_list_json,
-            fallback='{"devices": [], "error": "disk scan failed"}',
-        )
+        return self._guard(self._device_list_json, fallback="[]")
 
     def _device_list_json(self) -> str:
-        scan = inventory.scan_devices(self._runner)
-        if scan.error:
-            return _dumps({"devices": [], "error": scan.error})
-        devices = inventory.enrich_with_nvme(scan.devices, self._runner)
-        return _dumps({"devices": self._device_dicts(devices), "error": None})
-
-    @Slot(result=str)
-    def relaunchAsRoot(self) -> str:
-        return self._guard(self._relaunch_as_root)
-
-    def _relaunch_as_root(self) -> str:
-        """Keep this window up until polkit finishes, then hand off.
-
-        Quitting while pkexec is still starting unmounts the AppImage and
-        the password dialog never appears. A failure stays on screen.
-        """
-        if os.geteuid() == 0:
-            return _dumps({"ok": True, "error": None, "already_root": True})
-        try:
-            proc = subprocess.Popen(
-                relaunch_argv(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            return _dumps({"ok": False, "error": str(exc)})
-
-        from PySide6.QtCore import QTimer
-        from PySide6.QtWidgets import QApplication
-
-        app = QApplication.instance()
-        while proc.poll() is None:
-            if app is not None:
-                app.processEvents()
-            try:
-                proc.wait(timeout=0.05)
-            except subprocess.TimeoutExpired:
-                continue
-        stderr = (proc.stderr.read() if proc.stderr is not None else "") or ""
-        stdout = (proc.stdout.read() if proc.stdout is not None else "") or ""
-        if proc.returncode != 0:
-            detail = (stderr or stdout).strip()
-            if not detail:
-                detail = f"pkexec exited {proc.returncode} with no message"
-            return _dumps({"ok": False, "error": detail})
-        if app is not None:
-            QTimer.singleShot(400, app.quit)
-        return _dumps({"ok": True, "error": None})
+        return _dumps(self._device_list())
 
     @Slot(str, result=str)
     def deviceDetail(self, path: str) -> str:
@@ -435,9 +383,7 @@ class Api(QObject):
         )
         last_state = None
         if info.is_nvme:
-            raw = result_or_none(
-                self._runner.run(["nvme", "sanitize-log", info.path], timeout=15)
-            )
+            raw = result_or_none(self._runner.run(["nvme", "sanitize-log", info.path], timeout=15))
             if raw:
                 last_state = parse_sanitize_log(raw).state
         ata_caps = None
@@ -465,6 +411,177 @@ class Api(QObject):
         out["confirmation"] = {"word": "DESTROY", "device": dev["path"]}
         return _dumps(out)
 
+    @Slot(result=str)
+    def toolsCatalog(self) -> str:
+        return _dumps(
+            {
+                "tools": wipe_plan_mod.AVAILABLE_TOOLS,
+                "presets": list(wipe_plan_mod.PRESETS),
+            }
+        )
+
+    @Slot(str, str, result=str)
+    def pipelinePresets(self, preset: str, device_paths_json: str) -> str:
+        return self._guard(self._pipeline_presets, preset, device_paths_json)
+
+    def _pipeline_presets(self, preset: str, device_paths_json: str) -> str:
+        from .wipe.ata import probe_ata
+        from .wipe.inventory import DeviceInfo
+        from .wipe.nvme import parse_sanicap
+
+        paths = json.loads(device_paths_json or "[]")
+        devices = self._device_list()
+        targets = []
+        global_blockers = []
+        for path in paths:
+            dev_dict = next((d for d in devices if d["path"] == path), None)
+            if not dev_dict:
+                continue
+            caps = dev_dict["sanitize"] or {
+                "supported": False,
+                "block_erase": False,
+                "crypto_erase": False,
+                "overwrite": False,
+            }
+            info = DeviceInfo(
+                kname=dev_dict["kname"],
+                path=dev_dict["path"],
+                type=dev_dict["type"],
+                size_bytes=dev_dict["size_bytes"],
+                model=dev_dict["model"],
+                serial=dev_dict["serial"],
+                transport=dev_dict["transport"],
+                rotational=dev_dict.get("rotational", False),
+                has_reset=dev_dict.get("has_reset", False),
+                disk_type=dev_dict.get("disk_type", "ssd"),
+                partitions=[
+                    inventory.Partition(p["name"], p["size_bytes"], p["mountpoints"])
+                    for p in dev_dict.get("partitions", [])
+                ],
+                swap=dev_dict["swap"],
+            )
+            parsed_caps = parse_sanicap(
+                (caps["block_erase"] << 0) | (caps["crypto_erase"] << 1) | (caps["overwrite"] << 2)
+            )
+            ata_caps = None
+            if not info.is_nvme:
+                ata_caps = probe_ata(self._runner, info.path)
+            pipeline = wipe_plan_mod.build_pipeline_for_device(
+                info,
+                preset=preset,
+                caps=parsed_caps,
+                ata=ata_caps,
+            )
+            verdict = safety.check_device(
+                info,
+                self._runner,
+                allow_non_nvme=bool(self._app_settings.get("allow_non_nvme")),
+                unmount_planned=False,
+            )
+            pipeline.blockers = verdict.hard_blockers + verdict.soft_blockers
+            if verdict.hard_blockers:
+                global_blockers.extend(verdict.hard_blockers)
+            targets.append(pipeline.as_dict())
+
+        return _dumps(
+            {
+                "preset": preset,
+                "targets": targets,
+                "blockers": global_blockers,
+                "confirmation": {"word": "DESTROY", "devices": [t["device"] for t in targets]},
+            }
+        )
+
+    @Slot(str, result=str)
+    def pipelinePlan(self, config_json: str) -> str:
+        return self._guard(self._pipeline_plan, config_json)
+
+    def _pipeline_plan(self, config_json: str) -> str:
+        from .wipe.ata import probe_ata
+        from .wipe.inventory import DeviceInfo
+        from .wipe.nvme import parse_sanicap
+
+        cfg = json.loads(config_json or "{}")
+        targets_in = cfg.get("targets") or []
+        devices = self._device_list()
+        targets_out = []
+        global_blockers = []
+        unmount_planned = bool(cfg.get("unmount"))
+
+        for t_in in targets_in:
+            path = t_in.get("device", "")
+            dev_dict = next((d for d in devices if d["path"] == path), None)
+            if not dev_dict:
+                return _dumps({"error": f"device {path} not found"})
+            caps = dev_dict["sanitize"] or {
+                "supported": False,
+                "block_erase": False,
+                "crypto_erase": False,
+                "overwrite": False,
+            }
+            info = DeviceInfo(
+                kname=dev_dict["kname"],
+                path=dev_dict["path"],
+                type=dev_dict["type"],
+                size_bytes=dev_dict["size_bytes"],
+                model=dev_dict["model"],
+                serial=dev_dict["serial"],
+                transport=dev_dict["transport"],
+                rotational=dev_dict.get("rotational", False),
+                has_reset=dev_dict.get("has_reset", False),
+                disk_type=dev_dict.get("disk_type", "ssd"),
+                partitions=[
+                    inventory.Partition(p["name"], p["size_bytes"], p["mountpoints"])
+                    for p in dev_dict.get("partitions", [])
+                ],
+                swap=dev_dict["swap"],
+            )
+            parsed_caps = parse_sanicap(
+                (caps["block_erase"] << 0) | (caps["crypto_erase"] << 1) | (caps["overwrite"] << 2)
+            )
+            ata_caps = None
+            if not info.is_nvme:
+                ata_caps = probe_ata(self._runner, info.path)
+
+            raw_steps = t_in.get("steps") or []
+            steps = [
+                wipe_plan_mod.validate_custom_step(s, info, parsed_caps, ata_caps)
+                for s in raw_steps
+            ]
+
+            verdict = safety.check_device(
+                info,
+                self._runner,
+                allow_non_nvme=bool(self._app_settings.get("allow_non_nvme")),
+                unmount_planned=unmount_planned,
+            )
+            t_blockers = verdict.hard_blockers + verdict.soft_blockers
+            for s in steps:
+                if not s.supported and s.unsupported_reason:
+                    t_blockers.append(f"Step {s.n} ({s.kind}) unsupported: {s.unsupported_reason}")
+            if verdict.hard_blockers:
+                global_blockers.extend(verdict.hard_blockers)
+
+            target_pipeline = wipe_plan_mod.TargetPipeline(
+                device=info.path,
+                model=info.model,
+                size_bytes=info.size_bytes,
+                disk_type=info.disk_type,
+                steps=steps,
+                blockers=t_blockers,
+                notes=list(t_in.get("notes") or []),
+            )
+            targets_out.append(target_pipeline.as_dict())
+
+        return _dumps(
+            {
+                "preset": cfg.get("preset", "custom"),
+                "targets": targets_out,
+                "blockers": global_blockers,
+                "confirmation": {"word": "DESTROY", "devices": [t["device"] for t in targets_out]},
+            }
+        )
+
     @Slot(str, result=str)
     def wipeStart(self, config_json: str) -> str:
         return self._guard(self._wipe_start, config_json)
@@ -473,6 +590,39 @@ class Api(QObject):
         if self._busy():
             return _dumps({"ok": False, "error": "busy"})
         cfg = json.loads(config_json or "{}")
+
+        # Multi-target pipeline execution
+        if cfg.get("targets"):
+            plan = json.loads(self._pipeline_plan(json.dumps(cfg)))
+            if plan.get("error"):
+                return _dumps({"ok": False, "error": plan["error"]})
+            if plan.get("blockers"):
+                return _dumps({"ok": False, "error": "; ".join(plan["blockers"])})
+            target_devs = [t["device"] for t in plan.get("targets", [])]
+            conf_word = cfg.get("confirm_word")
+            conf_devs = cfg.get("confirm_devices") or (
+                [cfg.get("confirm_device")] if cfg.get("confirm_device") else []
+            )
+            if conf_word != "DESTROY" or set(conf_devs) != set(target_devs):
+                return _dumps({"ok": False, "error": "confirmation mismatch"})
+
+            worker_cfg = {
+                "targets": plan.get("targets", []),
+                "confirmation_word": conf_word,
+                "confirmation_devices": target_devs,
+                "allow_non_nvme": bool(self._app_settings.get("allow_non_nvme")),
+                "unmount_planned": bool(cfg.get("unmount")),
+                "dry_run": bool(cfg.get("dry_run")),
+            }
+            self._wipe_proc = WipeWorkerProc(worker_cfg, self)
+            self._wipe_proc.workerEvent.connect(self._on_wipe_event)
+            self._wipe_proc.finished.connect(self._on_wipe_finished)
+            self._open_wipe_log(",".join(target_devs))
+            self._wipe_proc.start()
+            self._emit_state()
+            return _dumps({"ok": True, "error": None})
+
+        # Legacy single device execution
         plan = json.loads(self._wipe_plan(json.dumps(cfg)))
         if plan.get("error"):
             return _dumps({"ok": False, "error": plan["error"]})
@@ -525,6 +675,10 @@ class Api(QObject):
             human = f"[WARN] {ev.get('text', '')}"
         elif kind == "error":
             human = f"[ERROR] {ev.get('text', '')}"
+        elif kind == "target_start":
+            human = f"TARGET {ev.get('target_index')}/{ev.get('targets_total')}: {ev.get('device')}"
+        elif kind == "target_done":
+            human = f"TARGET {ev.get('target_index')} COMPLETED: {ev.get('device')}"
         elif kind == "pass_start":
             human = f"PASS {ev.get('passno')}: {ev.get('detail', '')}"
         elif kind == "sanitize_progress":
@@ -708,7 +862,7 @@ class Api(QObject):
 
     # ------------------------------------------------------------- settings
 
-    @Slot(str, result=str)
+    @Slot(result=str)
     def settingsGet(self) -> str:
         return self._guard(self._settings_get)
 

@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 BLOCK_SIZE = 1024 * 1024  # 1 MiB, dd's bs=1M
-_PATTERNS = {"zeros": b"\x00", "ones": b"\xff"}
+_PATTERNS = {"zeros": b"\x00", "ones": b"\xff", "random": b"\xaa"}
 
 
 class WipeCancelled(Exception):
@@ -36,6 +36,8 @@ class WriteStats:
 
 
 def _make_block(pattern: str) -> bytes:
+    if pattern == "random":
+        return os.urandom(BLOCK_SIZE)
     return _PATTERNS[pattern] * BLOCK_SIZE
 
 
@@ -88,6 +90,13 @@ def write_pattern(
                 if _cancelled():
                     raise WipeCancelled(f"cancelled after {written} bytes")
                 n = min(BLOCK_SIZE, total_bytes - written)
+                if pattern == "random":
+                    rnd = os.urandom(n)
+                    if direct:
+                        buf.seek(0)
+                        buf.write(rnd)
+                    else:
+                        block = rnd
                 try:
                     if direct:
                         os.write(fd, view[:n])
@@ -176,14 +185,24 @@ def verify_pattern(
             if should_cancel and should_cancel():
                 raise WipeCancelled(f"cancelled during verify at offset {off}")
             data = _read_at(fd, off, block_size)
-            if data.count(byte) != block_size:
-                mismatches.append(
-                    {
-                        "offset": off,
-                        "expected": pattern,
-                        "actual_prefix": data[:16].hex(),
-                    }
-                )
+            if pattern == "random":
+                if data.count(b"\x00") == block_size or data.count(b"\xff") == block_size:
+                    mismatches.append(
+                        {
+                            "offset": off,
+                            "expected": "random",
+                            "actual_prefix": data[:16].hex(),
+                        }
+                    )
+            else:
+                if data.count(byte) != block_size:
+                    mismatches.append(
+                        {
+                            "offset": off,
+                            "expected": pattern,
+                            "actual_prefix": data[:16].hex(),
+                        }
+                    )
             if on_progress:
                 on_progress(i + 1, len(offsets))
     finally:

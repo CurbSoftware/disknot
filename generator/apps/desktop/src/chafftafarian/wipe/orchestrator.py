@@ -50,10 +50,12 @@ SANITIZE_TIMEOUT_S = 24 * 3600.0  # big drives legitimately take hours
 
 @dataclass
 class WipeConfig:
-    device: str  # "/dev/nvme1n1"
-    passes: list[dict]  # [{kind: sanitize|zeros|ones|verify, ...}]
+    device: str = ""  # "/dev/nvme1n1"
+    passes: list[dict] = field(default_factory=list)  # [{kind: sanitize|zeros|ones|verify, ...}]
+    targets: list[dict] = field(default_factory=list)  # [{"device": ..., "steps": [...]}]
     confirmation_word: str = ""
     confirmation_device: str = ""
+    confirmation_devices: list[str] = field(default_factory=list)
     control_dir: str = ""  # 0700 dir the GUI owns; <dir>/cancel
     allow_non_nvme: bool = False
     unmount_planned: bool = False
@@ -69,8 +71,10 @@ class WipeConfig:
         return cls(
             device=str(data.get("device") or ""),
             passes=[dict(p) for p in (data.get("passes") or []) if isinstance(p, dict)],
+            targets=[dict(t) for t in (data.get("targets") or []) if isinstance(t, dict)],
             confirmation_word=str(data.get("confirmation_word") or ""),
             confirmation_device=str(data.get("confirmation_device") or ""),
+            confirmation_devices=[str(d) for d in (data.get("confirmation_devices") or []) if d],
             control_dir=str(data.get("control_dir") or ""),
             allow_non_nvme=bool(data.get("allow_non_nvme", False)),
             unmount_planned=bool(data.get("unmount_planned", False)),
@@ -89,6 +93,7 @@ class WipeSummary:
     ok: bool
     cancelled: bool = False
     device: str = ""
+    targets_done: list[str] = field(default_factory=list)
     passes_total: int = 0
     passes_done: list[int] = field(default_factory=list)
     verify_ok: bool | None = None
@@ -113,12 +118,13 @@ class WipeOrchestrator:
 
     # -- device resolution (never trust the GUI's word) ------------------------
 
-    def _resolve_device(self) -> tuple[DeviceInfo | None, str | None]:
+    def _resolve_device(self, dev_path: str | None = None) -> tuple[DeviceInfo | None, str | None]:
+        target = dev_path or self.cfg.device
         devices = list_devices(self.runner, dev_dir=self.cfg.dev_dir)
         for dev in devices:
-            if dev.path == self.cfg.device or f"/dev/{dev.kname}" == self.cfg.device:
+            if dev.path == target or f"/dev/{dev.kname}" == target:
                 return dev, None
-        return None, f"device {self.cfg.device} not found among {len(devices)} disks"
+        return None, f"device {target} not found among {len(devices)} disks"
 
     def _caps(self, dev: DeviceInfo) -> SanitizeCaps:
         raw = result_or_none(self.runner.run(["nvme", "id-ctrl", dev.path], timeout=30))
@@ -197,9 +203,7 @@ class WipeOrchestrator:
         ident_raw = result_or_none(self.runner.run(identify_command(dev.path), timeout=15))
         caps = parse_hdparm_identify(ident_raw or "")
         if caps.frozen:
-            raise RuntimeError(
-                "this drive is frozen: firmware erase refused; power-cycle it"
-            )
+            raise RuntimeError("this drive is frozen: firmware erase refused; power-cycle it")
         if action == "sata-secure-erase":
             self._ata_secure_erase(dev, caps.security_erase_enhanced)
             return
@@ -222,14 +226,11 @@ class WipeOrchestrator:
                 self.emit(
                     "warning",
                     text=(
-                        "ATA sanitize cannot be aborted from the host. "
-                        "Waiting for the controller."
+                        "ATA sanitize cannot be aborted from the host. Waiting for the controller."
                     ),
                 )
             status = self.runner.run(sanitize_status_command(dev.path), timeout=30)
-            entry = parse_sanitize_status(
-                (status.stdout or "") + "\n" + (status.stderr or "")
-            )
+            entry = parse_sanitize_status((status.stdout or "") + "\n" + (status.stderr or ""))
             percent = 100.0 if entry.state == "success" else 0.0
             self.emit(
                 "sanitize_progress",
@@ -239,9 +240,7 @@ class WipeOrchestrator:
             )
             if entry.done:
                 if entry.state != "success":
-                    raise RuntimeError(
-                        f"hdparm sanitize ended ({entry.state}): see the wipe log"
-                    )
+                    raise RuntimeError(f"hdparm sanitize ended ({entry.state}): see the wipe log")
                 self.emit("log", text=f"hdparm sanitize done ({action})")
                 if cancel_seen:
                     raise WipeCancelled("cancelled during ATA sanitize")
@@ -252,9 +251,7 @@ class WipeOrchestrator:
     def _ata_secure_erase(self, dev: DeviceInfo, enhanced: bool) -> None:
         setp = self.runner.run(security_set_pass_command(dev.path), timeout=60)
         if not setp.ok:
-            raise RuntimeError(
-                f"hdparm security-set-pass failed: {setp.stderr.strip() or setp.rc}"
-            )
+            raise RuntimeError(f"hdparm security-set-pass failed: {setp.stderr.strip() or setp.rc}")
         self.emit("log", text="hdparm security password set (p); starting erase")
         erase = self.runner.run(
             security_erase_command(dev.path, enhanced=enhanced),
@@ -270,9 +267,7 @@ class WipeOrchestrator:
                 ),
             )
         if not erase.ok:
-            raise RuntimeError(
-                f"hdparm security-erase failed: {erase.stderr.strip() or erase.rc}"
-            )
+            raise RuntimeError(f"hdparm security-erase failed: {erase.stderr.strip() or erase.rc}")
         self.emit("log", text="hdparm security-erase done")
         if self._cancel_requested():
             raise WipeCancelled("cancelled during security-erase")
@@ -313,48 +308,61 @@ class WipeOrchestrator:
 
     def run(self) -> WipeSummary:
         started = time.monotonic()
-        passes = [
-            Pass(
-                n=i + 1,
-                kind=p.get("kind", "zeros"),
-                detail=p.get("detail", ""),
-                est_s=None,
-                action=p.get("action"),
-            )
-            for i, p in enumerate(self.cfg.passes)
-        ]
-        summary = WipeSummary(ok=False, device=self.cfg.device, passes_total=len(passes))
+        targets = self.cfg.targets
+        if not targets and self.cfg.device:
+            targets = [
+                {
+                    "device": self.cfg.device,
+                    "steps": self.cfg.passes,
+                    "size_bytes": self.cfg.size_bytes,
+                }
+            ]
 
-        dev, err = self._resolve_device()
-        if dev is None:
-            summary.errors.append(err or "device resolution failed")
+        total_steps = sum(len(t.get("steps") or t.get("passes") or []) for t in targets)
+        primary_dev = targets[0].get("device", self.cfg.device) if targets else self.cfg.device
+        summary = WipeSummary(ok=False, device=primary_dev, passes_total=total_steps)
+
+        if not targets:
+            summary.errors.append("no target devices configured")
             return summary
 
-        if self.cfg.confirmation_word != "DESTROY" or self.cfg.confirmation_device != dev.path:
+        # Check confirmation word
+        if self.cfg.confirmation_word != "DESTROY":
             summary.errors.append("confirmation mismatch: refusing")
             return summary
 
-        verdict = check_device(
-            dev,
-            self.runner,
-            allow_non_nvme=self.cfg.allow_non_nvme,
-            unmount_planned=self.cfg.unmount_planned,
-        )
-        if verdict.hard_blockers:
-            summary.errors.extend(verdict.hard_blockers)
+        # Check confirmation devices
+        target_devs = [str(t.get("device", "")) for t in targets if t.get("device")]
+        if self.cfg.confirmation_devices:
+            if set(self.cfg.confirmation_devices) != set(target_devs):
+                summary.errors.append("confirmation mismatch: refusing")
+                return summary
+        elif self.cfg.confirmation_device and (
+            len(target_devs) != 1 or self.cfg.confirmation_device != target_devs[0]
+        ):
+            summary.errors.append("confirmation mismatch: refusing")
             return summary
-        for note in verdict.soft_blockers:
-            summary.warnings.append(note)
 
-        if self.cfg.unmount_planned and dev.mounted:
-            for part in dev.partitions:
-                for mp in part.mountpoints:
-                    if mp == "[SWAP]":
-                        continue
-                    result = self.runner.run(["umount", mp], timeout=30)
-                    self.emit(
-                        "log", text=(f"umount {mp}: {'ok' if result.ok else result.stderr.strip()}")
-                    )
+        # Validate each target device before any action
+        resolved_targets: list[tuple[dict, DeviceInfo]] = []
+        for target_cfg in targets:
+            dev_path = target_cfg.get("device", "")
+            dev, err = self._resolve_device(dev_path)
+            if dev is None:
+                summary.errors.append(err or f"device resolution failed for {dev_path}")
+                return summary
+            verdict = check_device(
+                dev,
+                self.runner,
+                allow_non_nvme=self.cfg.allow_non_nvme,
+                unmount_planned=self.cfg.unmount_planned,
+            )
+            if verdict.hard_blockers:
+                summary.errors.extend(verdict.hard_blockers)
+                return summary
+            for note in verdict.soft_blockers:
+                summary.warnings.append(note)
+            resolved_targets.append((target_cfg, dev))
 
         if self.cfg.dry_run:
             summary.ok = True
@@ -362,69 +370,188 @@ class WipeOrchestrator:
             summary.duration_s = time.monotonic() - started
             return summary
 
-        size = self.cfg.size_bytes or dev.size_bytes
-        if not size:
-            summary.errors.append("device reports zero size")
-            return summary
-
+        is_multi_target = bool(self.cfg.targets)
+        global_pass_counter = 0
         try:
-            for pass_ in passes:
+            for t_idx, (target_cfg, initial_dev) in enumerate(resolved_targets):
                 if self._cancel_requested():
-                    raise WipeCancelled("cancelled between passes")
-                # the between-passes gate: mountedness is hard here
-                fresh_dev, ferr = self._resolve_device()
-                if fresh_dev is None:
-                    raise RuntimeError(ferr or "device vanished mid-wipe")
-                gate = recheck_before_pass(fresh_dev, self.runner, self.cfg.allow_non_nvme)
-                if not gate.ok:
-                    raise RuntimeError(
-                        "safety re-check failed before pass "
-                        f"{pass_.n}: {'; '.join(gate.hard_blockers)}"
+                    raise WipeCancelled("cancelled between targets")
+
+                dev_path = initial_dev.path
+                if is_multi_target:
+                    self.emit(
+                        "target_start",
+                        target_index=t_idx + 1,
+                        targets_total=len(resolved_targets),
+                        device=dev_path,
                     )
 
-                self.emit("pass_start", passno=pass_.n, kind=pass_.kind, detail=pass_.detail)
-                if pass_.kind == "sanitize":
-                    if (pass_.action or "").startswith("sata-"):
+                if self.cfg.unmount_planned and initial_dev.mounted:
+                    for part in initial_dev.partitions:
+                        for mp in part.mountpoints:
+                            if mp == "[SWAP]":
+                                continue
+                            result = self.runner.run(["umount", mp], timeout=30)
+                            self.emit(
+                                "log",
+                                text=(
+                                    f"umount {mp}: {'ok' if result.ok else result.stderr.strip()}"
+                                ),
+                            )
+
+                target_size = (
+                    target_cfg.get("size_bytes") or self.cfg.size_bytes or initial_dev.size_bytes
+                )
+                if not target_size:
+                    raise RuntimeError(f"device {dev_path} reports zero size")
+
+                steps_raw = target_cfg.get("steps") or target_cfg.get("passes") or []
+                passes = [
+                    Pass(
+                        n=i + 1,
+                        kind=p.get("kind", "zeros"),
+                        detail=p.get("detail", ""),
+                        est_s=None,
+                        action=p.get("action"),
+                    )
+                    for i, p in enumerate(steps_raw)
+                ]
+
+                for pass_ in passes:
+                    global_pass_counter += 1
+                    if self._cancel_requested():
+                        raise WipeCancelled("cancelled between passes")
+
+                    # the between-passes gate: mountedness is hard here
+                    fresh_dev, ferr = self._resolve_device(dev_path)
+                    if fresh_dev is None:
+                        raise RuntimeError(ferr or f"device {dev_path} vanished mid-wipe")
+                    gate = recheck_before_pass(fresh_dev, self.runner, self.cfg.allow_non_nvme)
+                    if not gate.ok:
+                        raise RuntimeError(
+                            f"safety re-check failed before pass {pass_.n} on {dev_path}: "
+                            f"{'; '.join(gate.hard_blockers)}"
+                        )
+
+                    pass_fields = {
+                        "passno": global_pass_counter,
+                        "kind": pass_.kind,
+                        "detail": pass_.detail,
+                    }
+                    if is_multi_target:
+                        pass_fields["device"] = dev_path
+                    self.emit("pass_start", **pass_fields)
+
+                    if pass_.kind in ("nvme_reset", "sanitize"):
+                        if (pass_.action or "").startswith("sata-"):
+                            self._ata_sanitize(fresh_dev, pass_)
+                        else:
+                            self._sanitize(fresh_dev, pass_)
+                    elif pass_.kind == "ata_erase":
                         self._ata_sanitize(fresh_dev, pass_)
+                    elif pass_.kind == "shred":
+                        stats = write_pattern(
+                            fresh_dev.path,
+                            "random",
+                            total_bytes=target_size,
+                            on_progress=partial(
+                                self._emit_pass_progress, passno=global_pass_counter
+                            ),
+                            should_cancel=self._cancel_requested,
+                        )
+                        if stats.enospc_at_end:
+                            summary.warnings.append("ENOSPC on the final partial block (normal)")
+                        self.emit(
+                            "log",
+                            text=(
+                                f"pass {pass_.n} (shred) done on {dev_path}: "
+                                f"{stats.bytes_written} bytes, direct={stats.used_direct}"
+                            ),
+                        )
+                    elif pass_.kind in ("zeros", "ones"):
+                        stats = write_pattern(
+                            fresh_dev.path,
+                            pass_.kind,
+                            total_bytes=target_size,
+                            on_progress=partial(
+                                self._emit_pass_progress, passno=global_pass_counter
+                            ),
+                            should_cancel=self._cancel_requested,
+                        )
+                        if stats.enospc_at_end:
+                            summary.warnings.append("ENOSPC on the final partial block (normal)")
+                        self.emit(
+                            "log",
+                            text=(
+                                f"pass {pass_.n} ({pass_.kind}) done on {dev_path}: "
+                                f"{stats.bytes_written} bytes, direct={stats.used_direct}"
+                            ),
+                        )
+                    elif pass_.kind == "overwrite_x":
+                        opts = target_cfg.get("options")
+                        p_count = int(opts.get("passes", 3) if isinstance(opts, dict) else 3)
+                        patterns = ["random", "ones", "zeros"]
+                        for p_idx in range(p_count):
+                            if self._cancel_requested():
+                                raise WipeCancelled("cancelled during overwrite_x")
+                            pat = patterns[p_idx % len(patterns)]
+                            self.emit(
+                                "log",
+                                text=f"overwrite pass {p_idx + 1}/{p_count} ({pat}) on {dev_path}",
+                            )
+                            write_pattern(
+                                fresh_dev.path,
+                                pat,
+                                total_bytes=target_size,
+                                on_progress=partial(
+                                    self._emit_pass_progress, passno=global_pass_counter
+                                ),
+                                should_cancel=self._cancel_requested,
+                            )
+                    elif pass_.kind == "chaff_create":
+                        from .chaff_step import create_chaff_on_device
+
+                        ok, msg = create_chaff_on_device(
+                            fresh_dev.path,
+                            self.runner,
+                            should_cancel=self._cancel_requested,
+                        )
+                        if not ok:
+                            summary.warnings.append(f"chaff_create warning on {dev_path}: {msg}")
+                        self.emit("log", text=f"chaff_create on {dev_path}: {msg}")
+                    elif pass_.kind == "chaff_delete":
+                        from .chaff_step import delete_chaff_on_device
+
+                        ok, msg = delete_chaff_on_device(fresh_dev.path, self.runner)
+                        self.emit("log", text=f"chaff_delete on {dev_path}: {msg}")
+                    elif pass_.kind == "verify":
+                        ok, mismatches = verify_pattern(
+                            fresh_dev.path,
+                            "zeros",
+                            total_bytes=target_size,
+                            should_cancel=self._cancel_requested,
+                            on_progress=partial(
+                                self._emit_verify_progress, passno=global_pass_counter
+                            ),
+                        )
+                        summary.verify_ok = ok if summary.verify_ok is not False else False
+                        summary.verify_mismatches.extend(mismatches[:64])
+                        res_label = "intact" if ok else "found mismatches"
+                        self.emit(
+                            "log",
+                            text=(
+                                f"verification on {dev_path}: "
+                                f"{res_label} ({len(mismatches)} blocks)"
+                            ),
+                        )
                     else:
-                        self._sanitize(fresh_dev, pass_)
-                elif pass_.kind in ("zeros", "ones"):
-                    stats = write_pattern(
-                        fresh_dev.path,
-                        pass_.kind,
-                        total_bytes=size,
-                        on_progress=partial(self._emit_pass_progress, passno=pass_.n),
-                        should_cancel=self._cancel_requested,
-                    )
-                    if stats.enospc_at_end:
-                        summary.warnings.append("ENOSPC on the final partial block (normal)")
-                    self.emit(
-                        "log",
-                        text=(
-                            f"pass {pass_.n} done: {stats.bytes_written} bytes, "
-                            f"direct={stats.used_direct}"
-                        ),
-                    )
-                elif pass_.kind == "verify":
-                    ok, mismatches = verify_pattern(
-                        fresh_dev.path,
-                        "zeros",
-                        total_bytes=size,
-                        should_cancel=self._cancel_requested,
-                        on_progress=partial(self._emit_verify_progress, passno=pass_.n),
-                    )
-                    summary.verify_ok = ok
-                    summary.verify_mismatches = mismatches[:64]
-                    self.emit(
-                        "log",
-                        text=(
-                            f"verification {'intact' if ok else 'found mismatches'}"
-                            f" ({len(mismatches)} blocks)"
-                        ),
-                    )
-                else:
-                    raise RuntimeError(f"unknown pass kind {pass_.kind!r}")
-                summary.passes_done.append(pass_.n)
+                        raise RuntimeError(f"unknown pass kind {pass_.kind!r}")
+                    summary.passes_done.append(global_pass_counter)
+
+                summary.targets_done.append(dev_path)
+                if is_multi_target:
+                    self.emit("target_done", target_index=t_idx + 1, device=dev_path)
+
         except WipeCancelled as exc:
             summary.cancelled = True
             summary.warnings.append(str(exc))
@@ -434,7 +561,7 @@ class WipeOrchestrator:
         summary.ok = (
             not summary.errors
             and not summary.cancelled
-            and len(summary.passes_done) == len(passes)
+            and len(summary.passes_done) == total_steps
             and summary.verify_ok is not False
         )
         summary.duration_s = time.monotonic() - started

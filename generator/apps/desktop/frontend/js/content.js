@@ -128,6 +128,39 @@ export const PLAN_DOES = {
   quick: 'This plan runs sanitize, then one zero pass. Fastest.',
 };
 
+export const PRESET_DOES = {
+  laptop_sale: 'Recommended for selling a computer: Multi-stage destruction including random shred, controller reset (if supported), zeros, forensic decoy chaff creation, chaff deletion, final zeroing, and sampled verification.',
+  paranoid_6pass: 'Six passes: hardware sanitize, zeros, ones, zeros, sanitize, zeros with trailing verification.',
+  nist_800_88_purge: 'NIST SP 800-88 Purge: Hardware Sanitize/Reset (or random shred), zeros, and verify.',
+  quick_wipe: 'Fastest sanitization: hardware sanitize or single zero pass with verify.',
+  chaff_conceal: 'Zero drive, generate synthetic decoy files to obscure slack/unallocated flash space, delete chaff, and verify.',
+  custom: 'Fully customized pipeline: select, arrange, and configure individual disk tools.',
+};
+
+export const TOOL_DOES = {
+  shred: 'Overwrite the whole drive with cryptographically strong pseudo-random data to obliterate prior bits.',
+  nvme_reset: 'Issue hardware Sanitize command directly to the NVMe controller (block erase, crypto erase, or overwrite).',
+  ata_erase: 'Firmware-level sanitize or security erase via hdparm for SATA drives.',
+  zeros: 'Overwrite the whole drive with 0x00 bytes.',
+  ones: 'Overwrite the whole drive with 0xFF bytes.',
+  overwrite_x: 'Loop multiple overwrite passes with alternating patterns.',
+  chaff_create: 'Format temporary filesystem and generate realistic synthetic documents to populate flash wear-leveling and slack areas.',
+  chaff_delete: 'Cleanly delete generated chaff files and remove temporary filesystem.',
+  verify: 'Sample blocks across the drive to confirm expected zero pattern.',
+};
+
+export function diskTypeLabel(dev) {
+  const type = dev.disk_type || (dev.is_nvme ? (dev.has_reset ? 'nvme_with_reset' : 'nvme_no_reset') : (dev.rotational ? 'hdd' : 'ssd'));
+  const map = {
+    nvme_with_reset: 'NVMe (with Reset)',
+    nvme_no_reset: 'NVMe (no Reset)',
+    ssd: 'SSD (Solid State)',
+    hdd: 'HDD (Rotational)',
+    usb: 'USB / Removable',
+  };
+  return map[type] || 'Disk';
+}
+
 export const ACTION_DOES = {
   'block-erase': 'This option is block erase (SANACT=2). The controller erases every NAND block.',
   'crypto-erase': 'This option is crypto erase (SANACT=4). The controller destroys its media encryption key. Fast. Only if this drive reports crypto erase.',

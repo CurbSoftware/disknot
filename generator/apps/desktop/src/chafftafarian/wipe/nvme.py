@@ -107,6 +107,11 @@ _SANICAP_RE = re.compile(
     r"(?:(\d+)|0x([0-9a-fA-F]+))\s*$",
     re.IGNORECASE,
 )
+_FNA_RE = re.compile(
+    r"^\s*(?:fna|format nvm attributes(?:\s*\(fna\))?)\s*:\s*"
+    r"(?:(\d+)|0x([0-9a-fA-F]+))\s*$",
+    re.IGNORECASE,
+)
 
 
 def parse_sanicap_from_id_ctrl(text: str) -> SanitizeCaps:
@@ -118,6 +123,26 @@ def parse_sanicap_from_id_ctrl(text: str) -> SanitizeCaps:
             raw = int(m.group(1) or m.group(2), 16 if m.group(2) else 10)
             return parse_sanicap(raw)
     return SanitizeCaps(0)
+
+
+def parse_fna_from_id_ctrl(text: str) -> int:
+    """Extract format nvm attributes (fna) bitfield from `nvme id-ctrl`."""
+    for line in text.splitlines():
+        m = _FNA_RE.match(line)
+        if m:
+            return int(m.group(1) or m.group(2), 16 if m.group(2) else 10)
+    return 0
+
+
+def has_nvme_reset_support(id_ctrl_text: str) -> bool:
+    """Return True if the controller reports either Sanitize support (sanicap != 0)
+    or Format NVM secure erase support (fna cryptographic or user-data erase)."""
+    sanicap = parse_sanicap_from_id_ctrl(id_ctrl_text)
+    if sanicap.supported:
+        return True
+    fna = parse_fna_from_id_ctrl(id_ctrl_text)
+    # Bit 1 = crypto erase format, Bit 2 = cryptographic erase vs all namespaces
+    return bool(fna & 0b110)
 
 
 # -- sanitize status log ---------------------------------------------------------

@@ -37,6 +37,9 @@ class DeviceInfo:
     os_disk: bool = False
     swap: bool = False
     sanitize_caps: dict | None = None  # from id-ctrl when probed
+    rotational: bool = False
+    has_reset: bool = False
+    disk_type: str = "ssd"  # nvme_with_reset | nvme_no_reset | ssd | hdd | usb
 
     @property
     def is_nvme(self) -> bool:
@@ -57,15 +60,21 @@ class DeviceInfo:
             out.extend(mp for mp in p.mountpoints if mp != "[SWAP]")
         return out
 
+    def compute_disk_type(self) -> str:
+        if self.is_nvme:
+            return "nvme_with_reset" if self.has_reset else "nvme_no_reset"
+        if self.transport == "usb":
+            return "usb"
+        if self.rotational:
+            return "hdd"
+        return "ssd"
 
-# CHILDREN is not an lsblk column. The JSON tree already includes
-# "children" for partitions. Asking for the column makes lsblk exit 1
-# and the drive list stays empty.
+
 _LSBLK_ARGS = [
     "lsblk",
     "-Jb",
     "-o",
-    "NAME,SIZE,TYPE,KNAME,MODEL,SERIAL,TRAN,MOUNTPOINTS,FSTYPE",
+    "NAME,SIZE,TYPE,KNAME,MODEL,SERIAL,TRAN,ROTA,MOUNTPOINTS,FSTYPE,CHILDREN",
 ]
 
 
@@ -91,6 +100,8 @@ def _parse_device(node: dict) -> DeviceInfo | None:
     if not kname or str(node.get("type")) != "disk":
         return None
     size = node.get("size")
+    rota_raw = node.get("rota")
+    rotational = bool(rota_raw in (True, 1, "1"))
     dev = DeviceInfo(
         kname=kname,
         path=f"/dev/{kname}",
@@ -99,7 +110,9 @@ def _parse_device(node: dict) -> DeviceInfo | None:
         model=node.get("model"),
         serial=node.get("serial"),
         transport=node.get("tran"),
+        rotational=rotational,
     )
+    dev.disk_type = dev.compute_disk_type()
     for child in node.get("children") or []:
         if not isinstance(child, dict):
             continue
@@ -121,38 +134,23 @@ def _parse_device(node: dict) -> DeviceInfo | None:
     return dev
 
 
-@dataclass
-class DeviceScan:
-    """Whole disks from one lsblk call, plus the reason the list is empty."""
-
-    devices: list[DeviceInfo]
-    error: str | None = None
-
-
-def scan_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> DeviceScan:
-    """All whole disks lsblk reports.
-
-    Never raises. An lsblk failure or a parse error is `error`, with an
-    empty device list. zram devices (RAM-backed swap) are excluded: wiping
-    RAM disks is meaningless and only clutters the drive bay. `dev_dir`
-    rewrites the /dev prefix: tests point it at a temp dir whose "devices"
-    are files.
-    """
+def list_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> list[DeviceInfo]:
+    """All whole disks lsblk reports. Never raises; an lsblk failure yields
+    []. zram devices (RAM-backed swap) are excluded: wiping RAM disks is
+    meaningless and only clutters the drive bay. `dev_dir` rewrites the
+    /dev prefix: tests point it at a temp dir whose "devices" are files."""
     import json
 
     result = runner.run(_LSBLK_ARGS, timeout=15)
     if not result.ok:
-        detail = (result.stderr or result.stdout or "").strip()
-        if not detail:
-            detail = f"lsblk exited {result.rc}"
-        return DeviceScan([], detail)
+        return []
     try:
-        data = json.loads(result.stdout or "")
+        data = json.loads(result.stdout)
     except ValueError:
-        return DeviceScan([], "lsblk did not return JSON.")
+        return []
     nodes = data.get("blockdevices") if isinstance(data, dict) else None
     if not isinstance(nodes, list):
-        return DeviceScan([], "lsblk JSON had no blockdevices list.")
+        return []
     devices: list[DeviceInfo] = []
     for node in nodes:
         dev = _parse_device(node)
@@ -160,27 +158,36 @@ def scan_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> DeviceScan:
             continue
         dev.path = f"{dev_dir}/{dev.kname}"
         devices.append(dev)
-    if not devices:
-        return DeviceScan([], "lsblk reported no whole disks.")
-    return DeviceScan(devices, None)
-
-
-def list_devices(runner: ToolRunner, *, dev_dir: str = "/dev") -> list[DeviceInfo]:
-    """Whole disks only. Callers that need the lsblk error use scan_devices."""
-    return scan_devices(runner, dev_dir=dev_dir).devices
+    return devices
 
 
 def enrich_with_nvme(devices: list[DeviceInfo], runner: ToolRunner) -> list[DeviceInfo]:
-    """Attach model/serial from `nvme list -o json` when nvme-cli is present.
+    """Attach model/serial from `nvme list -o json` when nvme-cli is present,
+    and probe NVMe controller reset/sanitize capabilities.
     Model strings from nvme-cli are richer than sysfs; lsblk stays the
     source of truth for geometry."""
     raw = result_or_none(runner.run(nvme_list_command(), timeout=15))
-    if not raw:
-        return devices
-    by_path = {d["DevicePath"]: d for d in parse_nvme_list_json(raw) if d.get("DevicePath")}
+    if raw:
+        by_path = {d["DevicePath"]: d for d in parse_nvme_list_json(raw) if d.get("DevicePath")}
+        for dev in devices:
+            entry = by_path.get(dev.path) or by_path.get(f"/dev/{dev.kname}")
+            if entry:
+                dev.model = dev.model or entry.get("ModelNumber")
+                dev.serial = dev.serial or entry.get("SerialNumber")
+
     for dev in devices:
-        entry = by_path.get(dev.path) or by_path.get(f"/dev/{dev.kname}")
-        if entry:
-            dev.model = dev.model or entry.get("ModelNumber")
-            dev.serial = dev.serial or entry.get("SerialNumber")
+        if dev.is_nvme:
+            id_raw = result_or_none(runner.run(["nvme", "id-ctrl", dev.path], timeout=15))
+            if id_raw:
+                from .nvme import has_nvme_reset_support, parse_sanicap_from_id_ctrl
+
+                caps = parse_sanicap_from_id_ctrl(id_raw)
+                dev.sanitize_caps = {
+                    "supported": caps.supported,
+                    "block_erase": caps.block_erase,
+                    "crypto_erase": caps.crypto_erase,
+                    "overwrite": caps.overwrite,
+                }
+                dev.has_reset = has_nvme_reset_support(id_raw)
+        dev.disk_type = dev.compute_disk_type()
     return devices

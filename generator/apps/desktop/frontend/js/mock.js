@@ -49,45 +49,56 @@ const BOOTSTRAP = {
   tools: { ...TOOLS },
   busy: false,
   kind: null,
-  root: false,
   app_settings: { allow_non_nvme: false, default_target: '/srv/chaff' },
   disk: { target: { free_gb: 33.1, used_gb: 48.9, total_gb: 82, tree_bytes: 402653184 } },
 };
 
 const DEVICES = [
   {
-    kname: 'nvme0n1', path: '/dev/nvme0n1', type: 'disk', transport: 'nvme',
-    size_bytes: 2000398934016, model: 'Samsung SSD 990 PRO 2TB',
-    serial: 'S6Z1NJ0R123456', is_nvme: true,
-    sanitize: { supported: true, block_erase: true, crypto_erase: true, overwrite: false },
+    kname: 'sda', path: '/dev/sda', type: 'disk', transport: 'usb',
+    size_bytes: 32000000000, model: 'SanDisk Ultra USB 3.0 (Live OS)',
+    serial: '030112214ABC', is_nvme: false,
+    rotational: false, has_reset: false, disk_type: 'usb',
+    sanitize: null,
     partitions: [
-      { name: 'nvme0n1p1', mountpoints: ['/boot/efi'], fstype: 'vfat', size_bytes: 536866816 },
-      { name: 'nvme0n1p2', mountpoints: ['/'], fstype: 'ext4', size_bytes: 1988163260416 },
+      { name: 'sda1', mountpoints: ['/'], fstype: 'iso9660', size_bytes: 32000000000 },
     ],
     os_disk: true, mounted: true, swap: false,
   },
   {
-    kname: 'nvme1n1', path: '/dev/nvme1n1', type: 'disk', transport: 'nvme',
-    size_bytes: 1000204886016, model: 'WD_BLACK SN770 1TB',
-    serial: 'WDF0101ABCDEF', is_nvme: true,
-    sanitize: { supported: true, block_erase: true, crypto_erase: false, overwrite: true },
+    kname: 'nvme0n1', path: '/dev/nvme0n1', type: 'disk', transport: 'nvme',
+    size_bytes: 2000398934016, model: 'Samsung SSD 990 PRO 2TB',
+    serial: 'S6Z1NJ0R123456', is_nvme: true,
+    rotational: false, has_reset: true, disk_type: 'nvme_with_reset',
+    sanitize: { supported: true, block_erase: true, crypto_erase: true, overwrite: false },
     partitions: [
-      { name: 'nvme1n1p1', mountpoints: ['/mnt/scratch'], fstype: 'ext4', size_bytes: 1000202039296 },
+      { name: 'nvme0n1p1', mountpoints: ['/mnt/data'], fstype: 'ext4', size_bytes: 2000398934016 },
     ],
     os_disk: false, mounted: true, swap: false,
   },
   {
-    kname: 'sda', path: '/dev/sda', type: 'disk', transport: 'usb',
-    size_bytes: 30752073728, model: 'Cruzer Glide 3.0',
-    serial: '030112214ABC', is_nvme: false,
-    sanitize: null,
+    kname: 'nvme1n1', path: '/dev/nvme1n1', type: 'disk', transport: 'nvme',
+    size_bytes: 1000204886016, model: 'Intel SSD 660p 1TB',
+    serial: 'WDF0101ABCDEF', is_nvme: true,
+    rotational: false, has_reset: false, disk_type: 'nvme_no_reset',
+    sanitize: { supported: false, block_erase: false, crypto_erase: false, overwrite: false },
     partitions: [],
     os_disk: false, mounted: false, swap: false,
   },
   {
     kname: 'sdb', path: '/dev/sdb', type: 'disk', transport: 'sata',
-    size_bytes: 500107862016, model: 'Samsung SSD 860 EVO 500GB',
+    size_bytes: 2000398934016, model: 'Seagate BarraCuda 2TB HDD',
+    serial: 'W6Z1NB0K123456', is_nvme: false,
+    rotational: true, has_reset: false, disk_type: 'hdd',
+    sanitize: null,
+    partitions: [],
+    os_disk: false, mounted: false, swap: false,
+  },
+  {
+    kname: 'sdc', path: '/dev/sdc', type: 'disk', transport: 'sata',
+    size_bytes: 500107862016, model: 'Crucial MX500 500GB SSD',
     serial: 'S3Z1NB0K123456', is_nvme: false,
+    rotational: false, has_reset: false, disk_type: 'ssd',
     sanitize: null,
     partitions: [],
     os_disk: false, mounted: false, swap: false,
@@ -96,6 +107,7 @@ const DEVICES = [
     kname: 'loop0', path: '/dev/loop0', type: 'disk', transport: null,
     size_bytes: 1073741824, model: '(loop)', serial: '',
     is_nvme: false,
+    rotational: false, has_reset: false, disk_type: 'loop',
     sanitize: null,
     partitions: [],
     os_disk: false, mounted: false, swap: false,
@@ -103,6 +115,9 @@ const DEVICES = [
 ];
 
 const SMART = {
+  '/dev/sda': {
+    smart: null, smart_error: 'permission', last_sanitize: null, ata: null,
+  },
   '/dev/nvme0n1': {
     smart: { passed: true, temperature_c: 48, power_on_hours: 6122,
              firmware: '4B2QJXD7', percentage_used: 41, available_spare: 100, media_errors: 0 },
@@ -113,17 +128,22 @@ const SMART = {
     smart: { passed: true, temperature_c: 36, power_on_hours: 1404,
              firmware: '731030WD', percentage_used: 3, available_spare: 100, media_errors: 0 },
     smart_error: null,
-    last_sanitize: { state: 'in-progress', media_modified: false, percent: 41 },
-  },
-  '/dev/sda': {
-    smart: null, smart_error: 'permission', last_sanitize: null, ata: null,
+    last_sanitize: null,
   },
   '/dev/sdb': {
+    smart: { passed: true, temperature_c: 32, power_on_hours: 12040,
+             firmware: '0001CC43', percentage_used: null, available_spare: null, media_errors: null },
+    smart_error: null,
+    last_sanitize: null,
+    ata: { frozen: false, sanitize_block: false, sanitize_crypto: false,
+           security_erase: true, security_erase_enhanced: true },
+  },
+  '/dev/sdc': {
     smart: { passed: true, temperature_c: 33, power_on_hours: 8801,
              firmware: 'RVT04B6Q', percentage_used: null, available_spare: null, media_errors: null },
     smart_error: null,
     last_sanitize: null,
-    ata: { frozen: true, sanitize_block: true, sanitize_crypto: true,
+    ata: { frozen: false, sanitize_block: true, sanitize_crypto: true,
            security_erase: true, security_erase_enhanced: true },
   },
   '/dev/loop0': {
@@ -195,11 +215,7 @@ export async function getBootstrap() {
 // -- devices -----------------------------------------------------------------
 
 export async function deviceList() {
-  return { devices: clone(devices), error: null };
-}
-
-export async function relaunchAsRoot() {
-  return { ok: false, error: 'Password prompt is not available in the browser preview.' };
+  return clone(devices);
 }
 
 export async function deviceDetail(pathOrKname) {
@@ -261,6 +277,217 @@ function sanitizeDetail(action, second) {
   return `This pass will run ${which} (block erase). The controller erases every block.`;
 }
 
+export async function toolsCatalog() {
+  return clone({
+    tools: [
+      { id: 'shred', name: 'Shred (Random Overwrite)', desc: 'Overwrite entire drive with random data to obliterate prior bits.', applicable_to: ['all'] },
+      { id: 'nvme_reset', name: 'NVMe Reset / Hardware Sanitize', desc: 'Issue hardware sanitize (block erase, crypto erase, or overwrite) to the NVMe controller.', applicable_to: ['nvme_with_reset'] },
+      { id: 'ata_erase', name: 'ATA Firmware Erase', desc: 'Firmware-level sanitize or security erase via hdparm.', applicable_to: ['ssd', 'hdd'] },
+      { id: 'zeros', name: 'Write Zeros (0x00)', desc: 'Overwrite the whole disk with 0x00 bytes.', applicable_to: ['all'] },
+      { id: 'ones', name: 'Write Ones (0xFF)', desc: 'Overwrite the whole disk with 0xFF bytes.', applicable_to: ['all'] },
+      { id: 'overwrite_x', name: 'Overwrite X Times', desc: 'Loop multiple overwrite passes with configurable patterns.', applicable_to: ['all'] },
+      { id: 'chaff_create', name: 'Create Chaff', desc: 'Format temporary filesystem and fill with realistic synthetic files to obscure forensic residue.', applicable_to: ['all'] },
+      { id: 'chaff_delete', name: 'Delete Chaff', desc: 'Cleanly delete the generated chaff files and remove temporary filesystem.', applicable_to: ['all'] },
+      { id: 'verify', name: 'Verify (Read-Back Sample)', desc: 'Sample blocks across the drive to confirm expected zero pattern.', applicable_to: ['all'] },
+    ],
+    presets: ['laptop_sale', 'paranoid_6pass', 'nist_800_88_purge', 'quick_wipe', 'chaff_conceal', 'custom'],
+  });
+}
+
+export async function pipelinePresets(preset, devicePathsJson) {
+  const paths = typeof devicePathsJson === 'string' ? JSON.parse(devicePathsJson || '[]') : (devicePathsJson || []);
+  const targets = [];
+  const globalBlockers = [];
+
+  for (const path of paths) {
+    const dev = devices.find((d) => d.path === path || d.kname === path);
+    if (!dev) continue;
+
+    const writeEst = Math.round(dev.size_bytes / 200e6) || 1;
+    const steps = [];
+    const notes = [];
+    const diskType = dev.disk_type || (dev.is_nvme ? (dev.has_reset ? 'nvme_with_reset' : 'nvme_no_reset') : (dev.rotational ? 'hdd' : 'ssd'));
+
+    const addStep = (kind, detail, est_s, act = null, options = {}, supported = true, unsupported_reason = null) => {
+      steps.push({
+        n: steps.length + 1,
+        kind,
+        detail,
+        est_s,
+        action: act,
+        options,
+        supported,
+        unsupported_reason,
+      });
+    };
+
+    if (preset === 'laptop_sale') {
+      addStep('shred', 'Overwrite whole drive with random data to shred existing data.', writeEst);
+      if (diskType === 'nvme_with_reset') {
+        addStep('nvme_reset', 'This pass will run NVMe Sanitize (block erase). The controller erases every block.', null, 'block-erase');
+        addStep('zeros', 'Overwrite whole disk with zeros.', writeEst);
+        addStep('chaff_create', 'Format temporary filesystem and populate synthetic decoy files.', 60);
+        addStep('chaff_delete', 'Cleanly delete chaff files and unmount temporary filesystem.', 15);
+        addStep('zeros', 'Final overwrite with zeros to leave drive completely clean.', writeEst);
+        addStep('verify', 'Read a sample of blocks and check they match zeros.', Math.round(writeEst / 8));
+      } else if (diskType === 'nvme_no_reset') {
+        notes.push('NVMe Reset not supported on this controller (sanicap=0); using multi-pass overwrite.');
+        addStep('ones', 'Overwrite whole disk with 0xFF pattern.', writeEst);
+        addStep('zeros', 'Overwrite whole disk with zeros.', writeEst);
+        addStep('chaff_create', 'Format temporary filesystem and populate synthetic decoy files.', 60);
+        addStep('chaff_delete', 'Cleanly delete chaff files and unmount temporary filesystem.', 15);
+        addStep('zeros', 'Final overwrite with zeros.', writeEst);
+        addStep('verify', 'Read a sample of blocks and check they match zeros.', Math.round(writeEst / 8));
+      } else if (diskType === 'hdd') {
+        addStep('overwrite_x', 'Loop 3 overwrite passes (random, ones, zeros) for magnetic media.', writeEst * 3, null, { passes: 3, patterns: ['random', 'ones', 'zeros'] });
+        addStep('zeros', 'Overwrite whole disk with zeros.', writeEst);
+        addStep('chaff_create', 'Format temporary filesystem and populate synthetic decoy files.', 60);
+        addStep('chaff_delete', 'Cleanly delete chaff files and unmount temporary filesystem.', 15);
+        addStep('zeros', 'Final overwrite with zeros.', writeEst);
+        addStep('verify', 'Read a sample of blocks and check they match zeros.', Math.round(writeEst / 8));
+      } else {
+        addStep('ones', 'Overwrite whole disk with 0xFF pattern.', writeEst);
+        addStep('zeros', 'Overwrite whole disk with zeros.', writeEst);
+        addStep('chaff_create', 'Format temporary filesystem and populate synthetic decoy files.', 60);
+        addStep('chaff_delete', 'Cleanly delete chaff files and unmount temporary filesystem.', 15);
+        addStep('zeros', 'Final overwrite with zeros.', writeEst);
+        addStep('verify', 'Read a sample of blocks and check they match zeros.', Math.round(writeEst / 8));
+      }
+    } else if (preset === 'paranoid_6pass') {
+      if (dev.is_nvme && dev.has_reset) {
+        addStep('nvme_reset', 'This pass will run NVMe Sanitize (block erase).', null, 'block-erase');
+      }
+      addStep('zeros', 'Overwrite whole disk with zeros.', writeEst);
+      addStep('ones', 'Overwrite whole disk with 0xFF.', writeEst);
+      addStep('zeros', 'Overwrite whole disk with zeros.', writeEst);
+      if (dev.is_nvme && dev.has_reset) {
+        addStep('nvme_reset', 'This pass will run a second NVMe Sanitize (block erase).', null, 'block-erase');
+      }
+      addStep('zeros', 'Final overwrite with zeros.', writeEst);
+      addStep('verify', 'Sampled verification of zeros.', Math.round(writeEst / 8));
+    } else if (preset === 'nist_800_88_purge') {
+      if (dev.is_nvme && dev.has_reset) {
+        addStep('nvme_reset', 'This pass will run NVMe Sanitize.', null, 'block-erase');
+      } else {
+        addStep('shred', 'Overwrite with random pattern.', writeEst);
+      }
+      addStep('zeros', 'Overwrite with zeros.', writeEst);
+      addStep('verify', 'Sampled verification.', Math.round(writeEst / 8));
+    } else if (preset === 'quick_wipe') {
+      if (dev.is_nvme && dev.has_reset) {
+        addStep('nvme_reset', 'This pass will run NVMe Sanitize.', null, 'block-erase');
+      } else {
+        addStep('zeros', 'Overwrite with zeros.', writeEst);
+      }
+      addStep('verify', 'Sampled verification.', Math.round(writeEst / 8));
+    } else if (preset === 'chaff_conceal') {
+      addStep('zeros', 'Overwrite with zeros.', writeEst);
+      addStep('chaff_create', 'Format temporary filesystem and populate synthetic decoy files.', 60);
+      addStep('chaff_delete', 'Cleanly delete chaff files and unmount.', 15);
+      addStep('zeros', 'Final overwrite with zeros.', writeEst);
+      addStep('verify', 'Sampled verification.', Math.round(writeEst / 8));
+    } else {
+      addStep('zeros', 'Overwrite with zeros.', writeEst);
+      addStep('verify', 'Sampled verification.', Math.round(writeEst / 8));
+    }
+
+    const devBlockers = [];
+    if (dev.os_disk) {
+      devBlockers.push('this disk hosts the running operating system');
+      globalBlockers.push(`${dev.path}: hosts the running operating system`);
+    }
+    if (dev.mounted) {
+      devBlockers.push('mounted partitions present');
+    }
+    if (dev.swap) {
+      devBlockers.push('swap active on this disk');
+    }
+
+    targets.push({
+      device: dev.path,
+      model: dev.model,
+      size_bytes: dev.size_bytes,
+      disk_type: diskType,
+      steps,
+      blockers: devBlockers,
+      notes,
+    });
+  }
+
+  return clone({
+    preset,
+    targets,
+    blockers: globalBlockers,
+    confirmation: { word: 'DESTROY', devices: targets.map((t) => t.device) },
+  });
+}
+
+export async function pipelinePlan(config) {
+  const cfg = typeof config === 'string' ? JSON.parse(config || '{}') : (config || {});
+  const targetsIn = cfg.targets || [];
+  const targetsOut = [];
+  const globalBlockers = [];
+  const unmountPlanned = Boolean(cfg.unmount);
+
+  for (const tIn of targetsIn) {
+    const dev = devices.find((d) => d.path === tIn.device || d.kname === tIn.device);
+    if (!dev) continue;
+
+    const tBlockers = [];
+    if (dev.os_disk) {
+      tBlockers.push('this disk hosts the running operating system');
+      globalBlockers.push(`${dev.path}: hosts the running operating system`);
+    }
+    if (dev.mounted && !unmountPlanned) {
+      tBlockers.push('mounted partitions present');
+    }
+    if (dev.swap) {
+      tBlockers.push('swap active on this disk');
+    }
+
+    const steps = (tIn.steps || []).map((s, idx) => {
+      let supported = true;
+      let unsupported_reason = null;
+      if (s.kind === 'nvme_reset' && (!dev.is_nvme || !dev.has_reset)) {
+        supported = false;
+        unsupported_reason = dev.is_nvme
+          ? 'NVMe controller does not support hardware reset (sanicap=0)'
+          : 'NVMe Reset is only supported on NVMe devices';
+      }
+      if (s.kind === 'ata_erase' && dev.is_nvme) {
+        supported = false;
+        unsupported_reason = 'ATA erase is only supported on SATA/IDE devices';
+      }
+      if (!supported && unsupported_reason) {
+        tBlockers.push(`Step ${idx + 1} (${s.kind}) unsupported: ${unsupported_reason}`);
+      }
+      return {
+        ...s,
+        n: idx + 1,
+        supported,
+        unsupported_reason,
+      };
+    });
+
+    targetsOut.push({
+      device: dev.path,
+      model: dev.model,
+      size_bytes: dev.size_bytes,
+      disk_type: dev.disk_type,
+      steps,
+      blockers: tBlockers,
+      notes: tIn.notes || [],
+    });
+  }
+
+  return clone({
+    preset: cfg.preset || 'custom',
+    targets: targetsOut,
+    blockers: globalBlockers,
+    confirmation: { word: 'DESTROY', devices: targetsOut.map((t) => t.device) },
+  });
+}
+
 export function wipePlan(config) {
   const cfg = typeof config === 'string' ? JSON.parse(config || '{}') : (config || {});
   const dev = devices.find((x) => x.path === cfg.device || x.kname === cfg.device);
@@ -318,6 +545,106 @@ export function wipePlan(config) {
 export async function wipeStart(config) {
   const cfg = typeof config === 'string' ? JSON.parse(config || '{}') : (config || {});
   if (state.busy) return { ok: false, error: 'busy' };
+
+  // Multi-target pipeline
+  if (cfg.targets && cfg.targets.length) {
+    const plan = await pipelinePlan(clone(cfg));
+    if (plan.error) return { ok: false, error: plan.error };
+    if (plan.blockers.length) return { ok: false, error: plan.blockers.join('; ') };
+    const targetDevs = plan.targets.map((t) => t.device);
+    const confWord = (cfg.confirm_word || '').toUpperCase();
+    const confDevs = cfg.confirm_devices || (cfg.confirm_device ? [cfg.confirm_device] : []);
+    if (confWord !== 'DESTROY' || new Set(confDevs).size !== targetDevs.length || !targetDevs.every((d) => confDevs.includes(d))) {
+      return { ok: false, error: 'confirmation mismatch' };
+    }
+
+    setState({ busy: true, kind: 'wipe', started: new Date().toISOString() });
+    line('wipe.log', `${now()} [START] pipeline wipe of ${targetDevs.join(', ')} (${plan.targets.length} targets)`);
+
+    let cancelled = false;
+    mock.abortWipe = () => {
+      cancelled = true;
+      line('wipe.log', `${now()} [WARN] cancel requested: finishing at the next checkpoint`);
+    };
+
+    let globalPassNo = 1;
+    const donePasses = [];
+    const allPassesCount = plan.targets.reduce((acc, t) => acc + (t.steps?.length || 0), 0);
+
+    for (let tIdx = 0; tIdx < plan.targets.length; tIdx++) {
+      if (cancelled) break;
+      const target = plan.targets[tIdx];
+      line('wipe', JSON.stringify({
+        event: 'target_start',
+        target_index: tIdx + 1,
+        targets_total: plan.targets.length,
+        device: target.device,
+      }));
+      line('wipe.log', `${now()} TARGET ${tIdx + 1}/${plan.targets.length}: ${target.device}`);
+
+      for (const step of (target.steps || [])) {
+        if (cancelled) break;
+        const passNum = globalPassNo++;
+        line('wipe', JSON.stringify({
+          event: 'pass_start',
+          passno: passNum,
+          kind: step.kind,
+          detail: step.detail,
+        }));
+        line('wipe.log', `${now()} PASS ${passNum}/${allPassesCount} [${target.device}]: ${step.detail}`);
+
+        const isSanitize = step.kind === 'nvme_reset' || step.kind === 'ata_erase' || step.kind === 'sanitize';
+        const numTicks = isSanitize ? 8 : 12;
+        for (let i = 1; i <= numTicks; i++) {
+          if (cancelled) break;
+          await sleep(isSanitize ? 50 : 30);
+          line('wipe', JSON.stringify({
+            event: isSanitize ? 'sanitize_progress' : 'pass_progress',
+            passno: passNum,
+            percent: Math.round((i / numTicks) * 100),
+            bytes_done: Math.round((i / numTicks) * target.size_bytes),
+            throughput_bps: 240e6,
+          }));
+        }
+        if (!cancelled) {
+          donePasses.push(passNum);
+          line('wipe.log', `${now()} PASS ${passNum}/${allPassesCount} done`);
+        }
+      }
+
+      if (!cancelled) {
+        line('wipe', JSON.stringify({
+          event: 'target_done',
+          target_index: tIdx + 1,
+          device: target.device,
+        }));
+        line('wipe.log', `${now()} TARGET ${tIdx + 1} COMPLETED: ${target.device}`);
+      }
+    }
+
+    clearTimers();
+    setState({ busy: false, kind: null, started: null });
+    const summary = {
+      ok: !cancelled,
+      cancelled,
+      devices: targetDevs,
+      passes_total: allPassesCount,
+      passes_done: cancelled ? 'partial' : allPassesCount,
+      duration_s: 312,
+    };
+    line('wipe', JSON.stringify({
+      event: 'done',
+      ok: !cancelled,
+      cancelled,
+      passes_total: allPassesCount,
+      passes_done: donePasses,
+    }));
+    line('wipe.log', `${now()} [DONE] ${cancelled ? 'cancelled' : 'pipeline wipe complete'}`);
+    report('wipe.summary', summary);
+    return { ok: true, error: null };
+  }
+
+  // Legacy single-device wipe
   const plan = wipePlan(clone(cfg));
   if (plan.error) return { ok: false, error: plan.error };
   if (plan.blockers.length) return { ok: false, error: plan.blockers.join('; ') };
@@ -334,7 +661,6 @@ export async function wipeStart(config) {
     line('wipe.log', `${now()} [WARN] cancel requested: finishing at the next checkpoint`);
   };
 
-  const totalPct = 100 / plan.passes.length;
   for (const p of plan.passes) {
     if (cancelled) break;
     line('wipe', JSON.stringify({ event: 'pass_start', pass: p.n, kind: p.kind }));
